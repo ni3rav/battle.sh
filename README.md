@@ -4,14 +4,24 @@ Terminal two-player Battleship over an operator-owned WebSocket Relay.
 
 ## Local development (`ws://`, no Caddy)
 
-Run the Relay on loopback, then connect two Players to that URL (or a fixed port):
+Run the Relay on loopback, then open two terminals as Host and Guest:
 
 ```bash
 uv sync
 uv run python -m battle_sh.networking.relay_cli --bind-host 127.0.0.1 --port 8765
 ```
 
-Use `ws://127.0.0.1:8765` from two terminal windows on the same machine. Caddy and TLS are not required for local play.
+```bash
+# Terminal A — Host
+uv run python -m battle_sh.ui host --relay ws://127.0.0.1:8765
+```
+
+```bash
+# Terminal B — Guest (paste the Invite the Host prints)
+uv run python -m battle_sh.ui guest --relay ws://127.0.0.1:8765 --invite PASTE_INVITE
+```
+
+Placement is keyboard-driven: random layout by default, then `r` re-roll, `s <Ship>` + `w/a/x/d`/`o` to adjust, `l` to lock. During play, enter Shots as Coordinates like `B7`. Caddy and TLS are not required for local play.
 
 ## Hosted Relay (`wss://` via Caddy + systemd)
 

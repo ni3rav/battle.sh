@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from dataclasses import dataclass
+from typing import Literal, cast
 
 
 COLUMNS = "ABCDEFGHIJ"
@@ -90,3 +92,110 @@ def placement_commitment(placement: Placement) -> str:
     }
     payload = json.dumps(canonical, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+Orientation = Literal["H", "V"]
+
+
+def ship_cells_from_bow(
+    bow: Coordinate, length: int, orientation: Orientation
+) -> frozenset[Coordinate]:
+    if orientation == "H":
+        start = COLUMNS.index(bow.column)
+        if start + length > len(COLUMNS):
+            raise IllegalPlacementError(f"Ship from {bow} runs off the Board")
+        return frozenset(
+            coordinate(COLUMNS[start + i], bow.row) for i in range(length)
+        )
+    if bow.row + length - 1 > 10:
+        raise IllegalPlacementError(f"Ship from {bow} runs off the Board")
+    return frozenset(coordinate(bow.column, bow.row + i) for i in range(length))
+
+
+def ship_bow_and_orientation(
+    cells: frozenset[Coordinate],
+) -> tuple[Coordinate, Orientation]:
+    ordered = sorted(cells)
+    columns = {c.column for c in ordered}
+    if len(columns) == 1:
+        return ordered[0], "V"
+    return ordered[0], "H"
+
+
+def _replace_ship(placement: Placement, name: str, cells: frozenset[Coordinate]) -> Placement:
+    ships = dict(placement.ships)
+    ships[name] = cells
+    updated = Placement(ships)
+    validate_placement(updated)
+    return updated
+
+
+def translate_ship(
+    placement: Placement, name: str, *, column_delta: int, row_delta: int
+) -> Placement:
+    """Move a Ship by column/row deltas, keeping orientation. Raises if illegal."""
+    if name not in placement.ships:
+        raise IllegalPlacementError(f"Unknown Ship: {name}")
+    bow, orientation = ship_bow_and_orientation(placement.ships[name])
+    new_col_idx = COLUMNS.index(bow.column) + column_delta
+    new_row = bow.row + row_delta
+    if new_col_idx < 0 or new_col_idx >= len(COLUMNS) or new_row not in ROWS:
+        raise IllegalPlacementError(f"Moving {name} would leave the Board")
+    new_bow = coordinate(COLUMNS[new_col_idx], new_row)
+    length = STANDARD_FLEET_LENGTHS[name]
+    return _replace_ship(
+        placement, name, ship_cells_from_bow(new_bow, length, orientation)
+    )
+
+
+def rotate_ship(placement: Placement, name: str) -> Placement:
+    """Rotate a Ship around its bow (H↔V). Raises if the result is illegal."""
+    if name not in placement.ships:
+        raise IllegalPlacementError(f"Unknown Ship: {name}")
+    bow, orientation = ship_bow_and_orientation(placement.ships[name])
+    flipped: Orientation = "V" if orientation == "H" else "H"
+    length = STANDARD_FLEET_LENGTHS[name]
+    return _replace_ship(
+        placement, name, ship_cells_from_bow(bow, length, flipped)
+    )
+
+
+def random_placement(rng: random.Random | None = None) -> Placement:
+    """Produce a legal random Standard Fleet Placement."""
+    rng = rng or random.Random()
+    names = sorted(
+        STANDARD_FLEET_LENGTHS, key=lambda n: STANDARD_FLEET_LENGTHS[n], reverse=True
+    )
+    for _ in range(500):
+        ships: dict[str, frozenset[Coordinate]] = {}
+        occupied: set[Coordinate] = set()
+        failed = False
+        for name in names:
+            length = STANDARD_FLEET_LENGTHS[name]
+            candidates: list[frozenset[Coordinate]] = []
+            for col in COLUMNS:
+                for row in ROWS:
+                    for orientation in ("H", "V"):
+                        try:
+                            cells = ship_cells_from_bow(
+                                coordinate(col, row),
+                                length,
+                                cast(Orientation, orientation),
+                            )
+                        except IllegalPlacementError:
+                            continue
+                        if occupied & cells:
+                            continue
+                        candidates.append(cells)
+            if not candidates:
+                failed = True
+                break
+            chosen = rng.choice(candidates)
+            ships[name] = chosen
+            occupied |= set(chosen)
+        if failed:
+            continue
+        placement = Placement(ships)
+        validate_placement(placement)
+        return placement
+    raise RuntimeError("Could not generate a legal random Placement")

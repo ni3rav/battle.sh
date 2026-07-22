@@ -223,7 +223,25 @@ class MatchConnection:
         if self._my_turn:
             raise NotYourTurnError("Cannot answer a Shot on your own firing turn")
 
-        shot_msg = await self._expect(MsgType.SHOT)
+        shot_msg = await self._recv()
+        if shot_msg.get("type") == MsgType.MATCH_END:
+            end = self._parse_match_end(shot_msg)
+            self._match_end = end
+            return ShotReport(
+                result="miss",
+                coordinate="",
+                match_end=end,
+            )
+        if shot_msg.get("type") == MsgType.ERROR:
+            raise MatchConnectionError(
+                str(shot_msg.get("code", "")),
+                str(shot_msg.get("message", "")),
+            )
+        if shot_msg.get("type") != MsgType.SHOT:
+            raise MatchConnectionError(
+                "unexpected",
+                f"Unexpected reply: {shot_msg.get('type')}",
+            )
         raw = shot_msg.get("coordinate")
         if not isinstance(raw, str):
             await self._send(
