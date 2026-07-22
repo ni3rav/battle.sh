@@ -1,4 +1,4 @@
-"""Match-session-over-Relay seam: create / join / reject paths."""
+"""Match-over-Relay seam: create / join / reject paths."""
 
 from __future__ import annotations
 

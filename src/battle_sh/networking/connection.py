@@ -7,6 +7,7 @@ from typing import Any, Self
 from websockets.asyncio.client import ClientConnection, connect
 
 from battle_sh.networking.protocol import MsgType, decode, encode
+from battle_sh.rules.placement import Placement, placement_commitment
 
 
 class MatchConnectionError(Exception):
@@ -18,14 +19,28 @@ class MatchConnectionError(Exception):
         super().__init__(f"{code}: {message}")
 
 
+class NotReadyToFireError(Exception):
+    """Raised when a Shot is attempted before both Placement Commitments are in."""
+
+
 class MatchConnection:
     def __init__(self, ws: ClientConnection) -> None:
         self._ws = ws
+        self._own_commitment: str | None = None
+        self._opponent_commitment: str | None = None
 
     @classmethod
     async def connect(cls, relay_url: str) -> Self:
         ws = await connect(relay_url)
         return cls(ws)
+
+    @property
+    def opponent_commitment(self) -> str | None:
+        return self._opponent_commitment
+
+    @property
+    def ready_to_fire(self) -> bool:
+        return self._own_commitment is not None and self._opponent_commitment is not None
 
     async def create_match(self) -> str:
         await self._send({"type": MsgType.CREATE_MATCH})
@@ -41,6 +56,35 @@ class MatchConnection:
 
     async def wait_for_player_joined(self) -> None:
         await self._expect(MsgType.PLAYER_JOINED)
+
+    async def lock_placement(self, placement: Placement) -> str:
+        """Validate Placement, seal it, and publish the Placement Commitment."""
+        commitment = placement_commitment(placement)
+        self._own_commitment = commitment
+        await self._send(
+            {"type": MsgType.PLACEMENT_COMMITMENT, "commitment": commitment}
+        )
+        return commitment
+
+    async def wait_for_opponent_commitment(self) -> str:
+        """Block until the opponent's Placement Commitment arrives."""
+        if self._opponent_commitment is not None:
+            return self._opponent_commitment
+        reply = await self._expect(MsgType.PLACEMENT_COMMITMENT)
+        value = reply.get("commitment")
+        if not isinstance(value, str) or not value:
+            raise MatchConnectionError(
+                "unexpected", "Placement Commitment missing commitment"
+            )
+        self._opponent_commitment = value
+        return value
+
+    async def fire_shot(self, _coordinate: str) -> None:
+        """Gate a Shot attempt until both Placement Commitments are exchanged."""
+        if not self.ready_to_fire:
+            raise NotReadyToFireError(
+                "Cannot fire until both Placement Commitments are exchanged"
+            )
 
     async def close(self) -> None:
         await self._ws.close()
