@@ -13,6 +13,7 @@ class MsgType(StrEnum):
     JOIN_MATCH = "join_match"
     MATCH_JOINED = "match_joined"
     PLAYER_JOINED = "player_joined"
+    PLACEMENT_COMMITMENT = "placement_commitment"
     ERROR = "error"
 
 
