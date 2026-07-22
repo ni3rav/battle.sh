@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 
 class MsgType(StrEnum):
@@ -13,8 +13,19 @@ class MsgType(StrEnum):
     JOIN_MATCH = "join_match"
     MATCH_JOINED = "match_joined"
     PLAYER_JOINED = "player_joined"
+    RECONNECT_MATCH = "reconnect_match"
+    MATCH_RESUMED = "match_resumed"
     PLACEMENT_COMMITMENT = "placement_commitment"
+    MATCH_END = "match_end"
     ERROR = "error"
+
+
+class MatchOutcome(StrEnum):
+    ABANDONED = "abandoned"
+    WINNER = "winner"
+
+
+Role = Literal["host", "guest"]
 
 
 class ErrorCode(StrEnum):
