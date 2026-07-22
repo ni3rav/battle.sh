@@ -16,6 +16,9 @@ class MsgType(StrEnum):
     RECONNECT_MATCH = "reconnect_match"
     MATCH_RESUMED = "match_resumed"
     PLACEMENT_COMMITMENT = "placement_commitment"
+    SHOT = "shot"
+    SHOT_RESULT = "shot_result"
+    REVEAL = "reveal"
     MATCH_END = "match_end"
     ERROR = "error"
 
@@ -36,6 +39,8 @@ class ErrorCode(StrEnum):
     ALREADY_IN_MATCH = "already_in_match"
     NOT_IN_MATCH = "not_in_match"
     PLAYER_GONE = "player_gone"
+    ILLEGAL_SHOT = "illegal_shot"
+    DUPLICATE_SHOT = "duplicate_shot"
 
 
 def encode(message: dict[str, Any]) -> str:

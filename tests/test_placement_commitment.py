@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from battle_sh.networking.connection import MatchConnection, NotReadyToFireError
@@ -138,7 +140,9 @@ async def test_firing_blocked_until_both_commitments_exchanged() -> None:
             await host.wait_for_opponent_commitment()
             await guest.wait_for_opponent_commitment()
 
+            guest_task = asyncio.create_task(guest.serve_opponent_shot())
             await host.fire_shot("B7")
+            await guest_task
         finally:
             await guest.close()
             await host.close()

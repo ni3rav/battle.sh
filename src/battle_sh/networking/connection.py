@@ -3,20 +3,36 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Self
 
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
 from battle_sh.networking.protocol import (
+    ErrorCode,
     MatchOutcome,
     MsgType,
     Role,
     decode,
     encode,
+    error_message,
 )
-from battle_sh.rules.placement import Placement, placement_commitment
+from battle_sh.rules.board import (
+    Board,
+    DuplicateShotError,
+    IllegalShotError,
+    ShotAnswer,
+    parse_coordinate,
+)
+from battle_sh.rules.placement import Coordinate, Placement, placement_commitment
+from battle_sh.rules.reveal import (
+    RevealVerificationError,
+    placement_from_reveal,
+    verify_fleet_reveal,
+    verify_ship_reveal,
+    verify_shot_answers_against_placement,
+)
 
 
 class MatchConnectionError(Exception):
@@ -32,25 +48,44 @@ class NotReadyToFireError(Exception):
     """Raised when a Shot is attempted before both Placement Commitments are in."""
 
 
+class NotYourTurnError(Exception):
+    """Raised when a Player fires out of turn."""
+
+
 @dataclass(frozen=True)
 class MatchEnd:
     outcome: MatchOutcome
     winner: Role | None = None
 
 
+@dataclass
+class ShotReport:
+    result: str
+    coordinate: str
+    ship: str | None = None
+    revealed_cells: tuple[str, ...] = ()
+    match_end: MatchEnd | None = None
+    verification_ok: bool | None = None
+
+
+@dataclass
 class MatchConnection:
-    def __init__(self, ws: ClientConnection, *, grace_seconds: float = 30.0) -> None:
-        self._ws = ws
-        self._grace_seconds = grace_seconds
-        self._own_commitment: str | None = None
-        self._opponent_commitment: str | None = None
-        self._invite: str | None = None
-        self._role: Role | None = None
+    _ws: ClientConnection
+    _grace_seconds: float = 30.0
+    _own_commitment: str | None = None
+    _opponent_commitment: str | None = None
+    _invite: str | None = None
+    _role: Role | None = None
+    _board: Board | None = None
+    _my_turn: bool = False
+    _outgoing: set[Coordinate] = field(default_factory=set)
+    _opponent_answers: list[ShotAnswer] = field(default_factory=list)
+    _match_end: MatchEnd | None = None
 
     @classmethod
     async def connect(cls, relay_url: str, *, grace_seconds: float = 30.0) -> Self:
         ws = await connect(relay_url)
-        return cls(ws, grace_seconds=grace_seconds)
+        return cls(_ws=ws, _grace_seconds=grace_seconds)
 
     @property
     def invite(self) -> str | None:
@@ -67,6 +102,18 @@ class MatchConnection:
     @property
     def ready_to_fire(self) -> bool:
         return self._own_commitment is not None and self._opponent_commitment is not None
+
+    @property
+    def my_turn(self) -> bool:
+        return self._my_turn
+
+    @property
+    def match_end(self) -> MatchEnd | None:
+        return self._match_end
+
+    def _arm_turns_if_ready(self) -> None:
+        if self.ready_to_fire and self._role is not None:
+            self._my_turn = self._role == "host"
 
     async def create_match(self) -> str:
         await self._send({"type": MsgType.CREATE_MATCH})
@@ -98,15 +145,18 @@ class MatchConnection:
     async def lock_placement(self, placement: Placement) -> str:
         """Validate Placement, seal it, and publish the Placement Commitment."""
         commitment = placement_commitment(placement)
+        self._board = Board(placement)
         self._own_commitment = commitment
         await self._send(
             {"type": MsgType.PLACEMENT_COMMITMENT, "commitment": commitment}
         )
+        self._arm_turns_if_ready()
         return commitment
 
     async def wait_for_opponent_commitment(self) -> str:
         """Block until the opponent's Placement Commitment arrives."""
         if self._opponent_commitment is not None:
+            self._arm_turns_if_ready()
             return self._opponent_commitment
         reply = await self._expect(MsgType.PLACEMENT_COMMITMENT)
         value = reply.get("commitment")
@@ -115,22 +165,206 @@ class MatchConnection:
                 "unexpected", "Placement Commitment missing commitment"
             )
         self._opponent_commitment = value
+        self._arm_turns_if_ready()
         return value
 
-    async def fire_shot(self, _coordinate: str) -> None:
-        """Gate a Shot attempt until both Placement Commitments are exchanged."""
+    async def fire_shot(self, coordinate_text: str) -> ShotReport:
+        """Fire one Shot on our turn; wait for the Board owner's answer (and Reveals)."""
         if not self.ready_to_fire:
             raise NotReadyToFireError(
                 "Cannot fire until both Placement Commitments are exchanged"
             )
+        if not self._my_turn:
+            raise NotYourTurnError("It is not your turn to fire")
+        try:
+            coord = parse_coordinate(coordinate_text)
+        except IllegalShotError:
+            raise
+        if coord in self._outgoing:
+            raise DuplicateShotError(f"Already fired at {coord}")
+
+        self._outgoing.add(coord)
+        await self._send({"type": MsgType.SHOT, "coordinate": str(coord)})
+        result_msg = await self._expect(MsgType.SHOT_RESULT)
+        answer = self._parse_shot_result(result_msg, expected=coord)
+        self._opponent_answers.append(answer)
+
+        revealed: list[str] = []
+        match_end: MatchEnd | None = None
+        verification_ok: bool | None = None
+
+        if answer.result == "sunk":
+            reveal = await self._expect(MsgType.REVEAL)
+            revealed = self._cells_from_ship_reveal(reveal, answer.ship)
+            verify_ship_reveal(answer.ship or "", revealed, self._opponent_answers)
+            if reveal.get("fleet_destroyed"):
+                full = await self._expect(MsgType.REVEAL)
+                self._verify_full_reveal(full)
+                verification_ok = True
+                end_msg = await self._expect(MsgType.MATCH_END)
+                match_end = self._parse_match_end(end_msg)
+                self._match_end = match_end
+
+        self._my_turn = False
+
+        return ShotReport(
+            result=answer.result,
+            coordinate=str(coord),
+            ship=answer.ship,
+            revealed_cells=tuple(revealed),
+            match_end=match_end,
+            verification_ok=verification_ok,
+        )
+
+    async def serve_opponent_shot(self) -> ShotReport:
+        """Answer one incoming Shot against our Board (split authority)."""
+        if self._board is None:
+            raise MatchConnectionError("unexpected", "No Placement locked")
+        if self._my_turn:
+            raise NotYourTurnError("Cannot answer a Shot on your own firing turn")
+
+        shot_msg = await self._expect(MsgType.SHOT)
+        raw = shot_msg.get("coordinate")
+        if not isinstance(raw, str):
+            await self._send(
+                error_message(ErrorCode.ILLEGAL_SHOT, "Shot missing coordinate")
+            )
+            raise IllegalShotError("Shot missing coordinate")
+        try:
+            coord = parse_coordinate(raw)
+            answer = self._board.resolve_incoming(coord)
+        except IllegalShotError as exc:
+            await self._send(error_message(ErrorCode.ILLEGAL_SHOT, str(exc)))
+            raise
+        except DuplicateShotError as exc:
+            await self._send(error_message(ErrorCode.DUPLICATE_SHOT, str(exc)))
+            raise
+
+        payload: dict[str, Any] = {
+            "type": MsgType.SHOT_RESULT,
+            "coordinate": str(coord),
+            "result": answer.result,
+        }
+        if answer.ship is not None:
+            payload["ship"] = answer.ship
+        await self._send(payload)
+
+        revealed: list[str] = []
+        match_end: MatchEnd | None = None
+
+        if answer.result == "sunk" and answer.ship is not None:
+            cells = sorted(str(c) for c in self._board.ship_cells(answer.ship))
+            revealed = cells
+            await self._send(
+                {
+                    "type": MsgType.REVEAL,
+                    "scope": "ship",
+                    "ship": answer.ship,
+                    "cells": cells,
+                    "fleet_destroyed": self._board.fleet_destroyed,
+                }
+            )
+            if self._board.fleet_destroyed:
+                full_ships = {
+                    name: sorted(str(c) for c in ship_cells)
+                    for name, ship_cells in self._board.placement.ships.items()
+                }
+                await self._send(
+                    {
+                        "type": MsgType.REVEAL,
+                        "scope": "fleet",
+                        "ships": full_ships,
+                    }
+                )
+                winner: Role = "guest" if self._role == "host" else "host"
+                end = MatchEnd(outcome=MatchOutcome.WINNER, winner=winner)
+                await self._send(
+                    {
+                        "type": MsgType.MATCH_END,
+                        "outcome": MatchOutcome.WINNER,
+                        "winner": winner,
+                    }
+                )
+                self._match_end = end
+                match_end = end
+
+        if match_end is None:
+            self._my_turn = True
+
+        return ShotReport(
+            result=answer.result,
+            coordinate=str(coord),
+            ship=answer.ship,
+            revealed_cells=tuple(revealed),
+            match_end=match_end,
+            verification_ok=None,
+        )
 
     async def wait_for_match_end(self) -> MatchEnd:
         """Block until the Match ends as Abandoned or with a Winner."""
+        if self._match_end is not None:
+            return self._match_end
         try:
             reply = await self._expect(MsgType.MATCH_END)
         except ConnectionClosed:
             await asyncio.sleep(self._grace_seconds)
-            return MatchEnd(outcome=MatchOutcome.ABANDONED)
+            end = MatchEnd(outcome=MatchOutcome.ABANDONED)
+            self._match_end = end
+            return end
+        end = self._parse_match_end(reply)
+        self._match_end = end
+        return end
+
+    async def close(self) -> None:
+        await self._ws.close()
+
+    def _parse_shot_result(
+        self, message: dict[str, Any], *, expected: Coordinate
+    ) -> ShotAnswer:
+        raw = message.get("coordinate")
+        result = message.get("result")
+        ship = message.get("ship")
+        if raw != str(expected):
+            raise MatchConnectionError(
+                "unexpected", f"Shot result coordinate mismatch: {raw!r}"
+            )
+        if result not in ("miss", "hit", "sunk"):
+            raise MatchConnectionError("unexpected", f"Bad shot result: {result!r}")
+        if result == "sunk" and not isinstance(ship, str):
+            raise MatchConnectionError("unexpected", "Sunk result missing ship")
+        return ShotAnswer(
+            coordinate=expected,
+            result=result,  # type: ignore[arg-type]
+            ship=ship if isinstance(ship, str) else None,
+        )
+
+    def _cells_from_ship_reveal(
+        self, message: dict[str, Any], ship: str | None
+    ) -> list[str]:
+        if message.get("scope") != "ship":
+            raise MatchConnectionError("unexpected", "Expected ship Reveal")
+        if ship is not None and message.get("ship") != ship:
+            raise MatchConnectionError("unexpected", "Reveal ship mismatch")
+        cells = message.get("cells")
+        if not isinstance(cells, list) or not all(isinstance(c, str) for c in cells):
+            raise MatchConnectionError("unexpected", "Reveal missing cells")
+        return list(cells)
+
+    def _verify_full_reveal(self, message: dict[str, Any]) -> None:
+        if message.get("scope") != "fleet":
+            raise MatchConnectionError("unexpected", "Expected fleet Reveal")
+        ships = message.get("ships")
+        if not isinstance(ships, dict):
+            raise MatchConnectionError("unexpected", "Fleet Reveal missing ships")
+        if self._opponent_commitment is None:
+            raise MatchConnectionError("unexpected", "No opponent commitment")
+        placement = placement_from_reveal(
+            {name: list(cells) for name, cells in ships.items()}
+        )
+        verify_fleet_reveal(placement, self._opponent_commitment)
+        verify_shot_answers_against_placement(placement, self._opponent_answers)
+
+    def _parse_match_end(self, reply: dict[str, Any]) -> MatchEnd:
         outcome_raw = reply.get("outcome")
         if outcome_raw == MatchOutcome.ABANDONED:
             return MatchEnd(outcome=MatchOutcome.ABANDONED)
@@ -144,9 +378,6 @@ class MatchConnection:
         raise MatchConnectionError(
             "unexpected", f"Unknown Match end outcome: {outcome_raw!r}"
         )
-
-    async def close(self) -> None:
-        await self._ws.close()
 
     async def _expect(self, expected: MsgType) -> dict[str, Any]:
         reply = await self._recv()
@@ -169,3 +400,17 @@ class MatchConnection:
         raw = await self._ws.recv()
         text = raw if isinstance(raw, str) else raw.decode()
         return decode(text)
+
+
+# Re-export rule errors for seam callers
+__all__ = [
+    "DuplicateShotError",
+    "IllegalShotError",
+    "MatchConnection",
+    "MatchConnectionError",
+    "MatchEnd",
+    "NotReadyToFireError",
+    "NotYourTurnError",
+    "RevealVerificationError",
+    "ShotReport",
+]
