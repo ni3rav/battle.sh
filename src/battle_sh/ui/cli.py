@@ -44,7 +44,9 @@ def main(argv: list[str] | None = None) -> None:
 
     invite = args.invite
     if not invite:
-        invite = io.ask("Invite> ").strip()
+        invite = io.ask("Paste Invite code (or q to quit)> ").strip()
+    if invite.lower() in {"q", "quit", "exit"}:
+        raise SystemExit(0)
     if not invite:
         raise SystemExit("Invite is required for Guest")
     asyncio.run(

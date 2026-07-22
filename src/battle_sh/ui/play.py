@@ -20,7 +20,7 @@ from battle_sh.networking.protocol import MatchOutcome
 from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import Coordinate, Placement
 from battle_sh.ui.boards import render_match_boards
-from battle_sh.ui.placement_flow import run_placement
+from battle_sh.ui.placement_flow import QuitRequested, run_placement
 from rich.console import Console
 from websockets.exceptions import ConnectionClosed
 
@@ -72,7 +72,7 @@ async def run_host(
         invite = await conn.create_match()
         if on_invite is not None:
             on_invite(invite)
-        io.print(f"Invite (send out-of-band): {invite}")
+        io.print(f"Invite code (share with your opponent): {invite}")
         io.print("Waiting for Guest to join…")
         await conn.wait_for_player_joined()
         io.print("Guest joined.")
@@ -81,11 +81,13 @@ async def run_host(
             io.console, io.ask, placement_factory=placement_factory
         )
         await conn.lock_placement(placement)
-        io.print("Placement locked. Waiting for opponent Placement Commitment…")
+        io.print("Layout locked. Waiting for opponent to lock theirs…")
         await conn.wait_for_opponent_commitment()
-        io.print("Both Commitments exchanged. You take the first Shot.")
+        io.print("Both ready. You fire first.")
 
         await _play_match(conn, placement, io)
+    except QuitRequested:
+        io.print("Quitting. Match Abandoned for your opponent.")
     finally:
         await conn.close()
 
@@ -108,11 +110,13 @@ async def run_guest(
             io.console, io.ask, placement_factory=placement_factory
         )
         await conn.lock_placement(placement)
-        io.print("Placement locked. Waiting for opponent Placement Commitment…")
+        io.print("Layout locked. Waiting for opponent to lock theirs…")
         await conn.wait_for_opponent_commitment()
-        io.print("Both Commitments exchanged. Waiting for Host's first Shot…")
+        io.print("Both ready. Waiting for Host's first shot…")
 
         await _play_match(conn, placement, io)
+    except QuitRequested:
+        io.print("Quitting. Match Abandoned for your opponent.")
     finally:
         await conn.close()
 
@@ -140,7 +144,7 @@ async def _play_match(
                 if report.match_end is not None:
                     break
             else:
-                io.print("Waiting for opponent Shot…")
+                io.print("Opponent's turn — waiting for their shot…")
                 report = await conn.serve_opponent_shot()
                 if report.match_end is not None:
                     break
@@ -170,13 +174,19 @@ async def _take_shot_until_legal(
     conn: MatchConnection, io: LiveIO | ScriptedIO
 ) -> ShotReport:
     while True:
-        raw = io.ask("Shot (e.g. B7)> ").strip()
+        raw = io.ask(
+            "Your turn — shoot (e.g. B7), or q to quit> "
+        ).strip()
+        if not raw:
+            continue
+        if raw.lower() in {"q", "quit", "exit"}:
+            raise QuitRequested
         try:
             report = await conn.fire_shot(raw)
             io.print(_format_shot_feedback(report, outgoing=True))
             return report
         except (IllegalShotError, DuplicateShotError, NotYourTurnError) as exc:
-            io.print(f"Rejected: {exc}")
+            io.print(f"Try again: {exc}")
 
 
 def _apply_outgoing(
@@ -205,11 +215,22 @@ def _apply_incoming(
 
 
 def _format_shot_feedback(report: ShotReport, *, outgoing: bool) -> str:
-    who = "Your Shot" if outgoing else "Incoming Shot"
-    base = f"{who} {report.coordinate}: {report.result}"
-    if report.ship:
-        base += f" ({report.ship})"
-    return base
+    cell = report.coordinate
+    if outgoing:
+        if report.result == "miss":
+            return f"You shot {cell} — miss."
+        if report.result == "hit":
+            ship = f" ({report.ship})" if report.ship else ""
+            return f"You shot {cell} — hit{ship}!"
+        ship = report.ship or "ship"
+        return f"You shot {cell} — sunk their {ship}!"
+    if report.result == "miss":
+        return f"Opponent shot {cell} — miss."
+    if report.result == "hit":
+        ship = f" ({report.ship})" if report.ship else ""
+        return f"Opponent shot {cell} — hit{ship}!"
+    ship = report.ship or "ship"
+    return f"Opponent shot {cell} — they sank your {ship}!"
 
 
 def _announce_end(
@@ -223,7 +244,7 @@ def _announce_end(
         io.print("Match Abandoned (no Winner).")
     elif outcome == MatchOutcome.WINNER:
         if winner == role:
-            io.print("Winner: you.")
+            io.print("You win!")
         else:
             io.print(f"Winner: {winner}.")
     if verification_ok is True:

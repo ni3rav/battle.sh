@@ -13,20 +13,54 @@ from battle_sh.rules.placement import (
     rotate_ship,
     translate_ship,
 )
-from battle_sh.ui.boards import own_board_renderable
+from battle_sh.ui.boards import SHIP_GLYPH, board_legend, own_board_renderable
 from rich.console import Console
 
-
-HELP = """Placement commands:
-  r / reroll              new random Placement
-  s <Ship>                select Ship (Carrier, Battleship, Cruiser, Submarine, Destroyer)
-  w/a/x/d                 move selected Ship up/left/down/right
-  o / rotate              rotate selected Ship around its bow
-  l / lock                lock Placement and publish Placement Commitment
-  h / help                show this help
-"""
-
+_SHIP_ORDER = tuple(STANDARD_FLEET_LENGTHS)
 _SHIP_BY_LOWER = {name.lower(): name for name in STANDARD_FLEET_LENGTHS}
+_SHIP_BY_INDEX = {str(i): name for i, name in enumerate(_SHIP_ORDER, start=1)}
+_MOVE_DELTA = {
+    "w": (0, -1),
+    "a": (-1, 0),
+    "x": (0, 1),
+    "d": (1, 0),
+    "up": (0, -1),
+    "left": (-1, 0),
+    "down": (0, 1),
+    "right": (1, 0),
+}
+
+class QuitRequested(Exception):
+    """Player asked to leave the Match (q / quit)."""
+
+
+HELP = """Place your ships (a random layout is ready).
+
+  r                 new random layout
+  1-5  or  s <Ship> select a ship (see list below)
+  w/a/x/d           move selected ship  (also: up / left / down / right)
+  o                 rotate selected ship
+  l                 lock this layout and continue
+  q                 quit
+  h                 show this help
+
+Ships: """ + "  ".join(
+    f"{i}={name}({length}/{SHIP_GLYPH[name]})"
+    for i, (name, length) in enumerate(STANDARD_FLEET_LENGTHS.items(), start=1)
+)
+
+
+def _ship_list_line() -> str:
+    return "  ".join(
+        f"[{i}] {name} ({length})={SHIP_GLYPH[name]}"
+        for i, (name, length) in enumerate(STANDARD_FLEET_LENGTHS.items(), start=1)
+    )
+
+
+def _resolve_ship(token: str) -> str | None:
+    if token in _SHIP_BY_INDEX:
+        return _SHIP_BY_INDEX[token]
+    return _SHIP_BY_LOWER.get(token.lower())
 
 
 def run_placement(
@@ -41,13 +75,26 @@ def run_placement(
     placement = factory()
     selected: str | None = None
 
+    console.print(
+        "Place your ships. A random layout is ready — lock it, re-roll, or adjust."
+    )
+    console.print(HELP)
+
     while True:
-        console.print(own_board_renderable(placement, {}))
+        console.print(own_board_renderable(placement, {}, selected=selected))
+        console.print(board_legend(show_ships=True))
+        console.print(_ship_list_line())
         if selected:
-            console.print(f"Selected: {selected}")
+            console.print(
+                f"Selected: [bold yellow]{selected}[/]  "
+                f"— move [bold]w/a/x/d[/] (or up/left/down/right), "
+                f"rotate [bold]o[/], lock [bold]l[/], quit [bold]q[/]"
+            )
         else:
-            console.print("No Ship selected (s <Ship>).")
-        console.print("Commands: r, s <Ship>, w/a/x/d, o, l, h")
+            console.print(
+                "No ship selected — type [bold]1-5[/] (or [bold]s Carrier[/]), "
+                "then move it. Ready? [bold]l[/] lock · [bold]q[/] quit."
+            )
         raw = ask("Placement> ").strip()
         if not raw:
             continue
@@ -57,37 +104,44 @@ def run_placement(
         if cmd in {"h", "help", "?"}:
             console.print(HELP)
             continue
+        if cmd in {"q", "quit", "exit"}:
+            raise QuitRequested
         if cmd in {"r", "reroll"}:
             placement = factory() if placement_factory else random_placement(rng)
             selected = None
-            console.print("Re-rolled Placement.")
+            console.print("New random layout.")
+            continue
+        if cmd in _SHIP_BY_INDEX and len(parts) == 1:
+            selected = _SHIP_BY_INDEX[cmd]
+            console.print(f"Selected {selected}.")
             continue
         if cmd in {"s", "select"}:
             if len(parts) < 2:
-                console.print("Usage: s <Ship>")
+                console.print("Usage: s <Ship>  or just 1-5")
                 continue
-            name = _SHIP_BY_LOWER.get(parts[1].lower())
+            name = _resolve_ship(parts[1])
             if name is None:
-                console.print(f"Unknown Ship: {parts[1]!r}")
+                console.print(f"Unknown ship: {parts[1]!r} — try 1-5 or a name")
                 continue
             selected = name
+            console.print(f"Selected {selected}.")
             continue
         if cmd in {"l", "lock"}:
             return placement
         if cmd in {"o", "rotate"}:
             if selected is None:
-                console.print("Select a Ship first (s <Ship>).")
+                console.print("Select a ship first (1-5).")
                 continue
             try:
                 placement = rotate_ship(placement, selected)
             except IllegalPlacementError as exc:
-                console.print(f"Illegal rotate: {exc}")
+                console.print(f"Can't rotate there: {exc}")
             continue
-        if cmd in {"w", "a", "x", "d"}:
+        if cmd in _MOVE_DELTA:
             if selected is None:
-                console.print("Select a Ship first (s <Ship>).")
+                console.print("Select a ship first (1-5).")
                 continue
-            delta = {"w": (0, -1), "a": (-1, 0), "x": (0, 1), "d": (1, 0)}[cmd]
+            delta = _MOVE_DELTA[cmd]
             try:
                 placement = translate_ship(
                     placement,
@@ -96,6 +150,6 @@ def run_placement(
                     row_delta=delta[1],
                 )
             except IllegalPlacementError as exc:
-                console.print(f"Illegal move: {exc}")
+                console.print(f"Can't move there: {exc}")
             continue
-        console.print(f"Unknown command: {raw!r} (h for help)")
+        console.print(f"Unknown command: {raw!r} — type h for help")
