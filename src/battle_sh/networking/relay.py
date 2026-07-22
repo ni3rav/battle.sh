@@ -315,3 +315,19 @@ async def start_relay(
         bound_port = socks[0].getsockname()[1]
         yield f"ws://{bind_host}:{bound_port}"
         await asyncio.sleep(0)
+
+
+async def run_relay(
+    bind_host: str = "127.0.0.1",
+    port: int = 8765,
+    *,
+    grace_seconds: float = 30.0,
+) -> None:
+    """Serve the Relay until cancelled (systemd / local process entry)."""
+    state = _RelayState(grace_seconds=grace_seconds)
+
+    async def handler(ws: ServerConnection) -> None:
+        await _handle_client(ws, state)
+
+    async with serve(handler, bind_host, port):
+        await asyncio.Future()
