@@ -5,6 +5,7 @@ description = "Terminal 2-player Battleship over a provisioned WebSocket Relay"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "readchar>=4.2.2",
     "rich>=15.0.0",
     "websockets>=16.1.1",
 ]

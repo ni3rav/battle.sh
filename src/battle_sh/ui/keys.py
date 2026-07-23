@@ -7,6 +7,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
+import readchar
+
 
 @dataclass(frozen=True)
 class Key:
@@ -44,3 +46,31 @@ class ScriptedKeySource:
         if not self._keys:
             raise EOFError("No scripted key left")
         return self._keys.popleft()
+
+
+_RAW_TO_NAME: dict[str, str] = {
+    readchar.key.UP: "up",
+    readchar.key.DOWN: "down",
+    readchar.key.LEFT: "left",
+    readchar.key.RIGHT: "right",
+    readchar.key.TAB: "tab",
+    # CSI Z — Shift+Tab (readchar.key.SHIFT_TAB; stubs omit it on some platforms)
+    "\x1b[Z": "shift+tab",
+    readchar.key.ENTER: "enter",
+    readchar.key.CR: "enter",
+    readchar.key.SPACE: "space",
+    readchar.key.CTRL_C: "ctrl+c",
+}
+
+
+class TerminalKeySource:
+    """Production KeySource: reads raw terminal keys via readchar."""
+
+    def read(self) -> Key:
+        raw = readchar.readkey()
+        name = _RAW_TO_NAME.get(raw)
+        if name is not None:
+            return Key(name)
+        if len(raw) == 1 and raw.isprintable():
+            return Key(raw.lower())
+        return Key(raw)

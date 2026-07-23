@@ -21,7 +21,7 @@ from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import Coordinate, Placement
 from battle_sh.ui.boards import render_match_boards
 from battle_sh.ui.clock import Clock, FakeClock, SystemClock
-from battle_sh.ui.keys import KeySource, ScriptedKeySource
+from battle_sh.ui.keys import KeySource, ScriptedKeySource, TerminalKeySource
 from battle_sh.ui.placement_flow import QuitRequested, run_placement
 from rich.console import Console
 from websockets.exceptions import ConnectionClosed
@@ -59,6 +59,7 @@ class ScriptedIO:
 class LiveIO:
     console: Console = field(default_factory=Console)
     clock: Clock = field(default_factory=SystemClock)
+    keys: KeySource = field(default_factory=TerminalKeySource)
 
     def print(self, *args: object, **kwargs: object) -> None:
         self.console.print(*args, **kwargs)  # type: ignore[arg-type]
@@ -87,7 +88,10 @@ async def run_host(
         io.print("Guest joined.")
 
         placement = run_placement(
-            io.console, io.ask, placement_factory=placement_factory
+            io.keys,
+            console=io.console,
+            on_message=io.print,
+            placement_factory=placement_factory,
         )
         await conn.lock_placement(placement)
         io.print("Layout locked. Waiting for opponent to lock theirs…")
@@ -116,7 +120,10 @@ async def run_guest(
         io.print(f"Joined Match with Invite {invite}.")
 
         placement = run_placement(
-            io.console, io.ask, placement_factory=placement_factory
+            io.keys,
+            console=io.console,
+            on_message=io.print,
+            placement_factory=placement_factory,
         )
         await conn.lock_placement(placement)
         io.print("Layout locked. Waiting for opponent to lock theirs…")

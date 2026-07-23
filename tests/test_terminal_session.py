@@ -11,6 +11,7 @@ from battle_sh.networking.connection import MatchConnection
 from battle_sh.networking.relay import start_relay
 from battle_sh.rules.placement import Placement, coordinate
 from battle_sh.ui.play import ScriptedIO, run_guest, run_host
+from battle_sh.ui.keys import ScriptedKeySource
 
 
 def _placement_a() -> Placement:
@@ -78,11 +79,14 @@ async def test_host_and_guest_sessions_complete_a_winner_match() -> None:
         "G8",
     ]
     assert len(guest_misses) == len(guest_targets) - 1
-    host_inputs = deque(["lock", *guest_targets])
-    guest_inputs = deque(["lock", *guest_misses])
-
-    host_io = ScriptedIO(host_inputs)
-    guest_io = ScriptedIO(guest_inputs)
+    host_io = ScriptedIO(
+        inputs=deque(guest_targets),
+        keys=ScriptedKeySource(["y"]),
+    )
+    guest_io = ScriptedIO(
+        inputs=deque(guest_misses),
+        keys=ScriptedKeySource(["y"]),
+    )
 
     async with start_relay() as relay_url:
         invite_holder: list[str] = []
@@ -120,7 +124,7 @@ async def test_host_and_guest_sessions_complete_a_winner_match() -> None:
 
 
 async def test_guest_ui_reports_abandoned_when_host_disconnects() -> None:
-    guest_io = ScriptedIO(deque(["lock"]))
+    guest_io = ScriptedIO(inputs=deque(), keys=ScriptedKeySource(["y"]))
 
     async with start_relay(grace_seconds=0.05) as relay_url:
         host = await MatchConnection.connect(relay_url, grace_seconds=0.05)
