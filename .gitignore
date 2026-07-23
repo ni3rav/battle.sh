@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 CONTEXT.md
+
+# Local scratch (practice-VM SSH keys, etc.)
+.scratch/

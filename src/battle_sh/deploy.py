@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 
-def render_caddyfile(*, domain: str, email: str, upstream: str) -> str:
-    """Caddy terminates HTTPS/WSS for domain and proxies to the local Relay."""
-    return (
-        f"{{\n"
-        f"\temail {email}\n"
-        f"}}\n"
-        f"\n"
-        f"{domain} {{\n"
-        f"\treverse_proxy {upstream}\n"
-        f"}}\n"
-    )
+def render_caddyfile(
+    *,
+    domain: str,
+    email: str,
+    upstream: str,
+    tls_internal: bool = False,
+) -> str:
+    """Caddy terminates HTTPS/WSS for domain and proxies to the local Relay.
+
+    ``tls_internal`` uses Caddy's local CA (practice VMs / Docker without
+    public DNS). Real cloud hosts leave it false for Let's Encrypt.
+    """
+    global_block = f"{{\n\temail {email}\n}}\n\n"
+    site_lines = [f"{domain} {{"]
+    if tls_internal:
+        site_lines.append("\ttls internal")
+    site_lines.append(f"\treverse_proxy {upstream}")
+    site_lines.append("}\n")
+    return global_block + "\n".join(site_lines) + "\n"
 
 
 def render_relay_unit(

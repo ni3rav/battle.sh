@@ -89,6 +89,31 @@ def test_deprovision_dry_run_lists_stop_and_remove_steps(tmp_path: Path) -> None
     assert "caddy" in lowered
 
 
+def test_provision_dry_run_tls_internal_writes_internal_directive(
+    tmp_path: Path,
+) -> None:
+    result = subprocess.run(
+        [
+            str(PROVISION),
+            "--host",
+            "root@203.0.113.10",
+            "--domain",
+            "relay.local.test",
+            "--email",
+            "ops@example.com",
+            "--tls-internal",
+            "--dry-run",
+            "--output-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "tls internal" in (tmp_path / "Caddyfile").read_text()
+
+
 def test_no_aws_specific_provision_helpers_ship() -> None:
     scripts = REPO_ROOT / "scripts"
     names = [p.name.lower() for p in scripts.iterdir()] if scripts.is_dir() else []

@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# Practice cloud VM in Docker: systemd + SSH, then provision-relay against it.
+# Not the production deploy model (see ADR-0001) — only a local stand-in host.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NAME="${BATTLE_SH_VM_NAME:-battle-sh-practice-vm}"
+IMAGE="${BATTLE_SH_VM_IMAGE:-jrei/systemd-ubuntu:24.04}"
+SSH_PORT="${BATTLE_SH_VM_SSH_PORT:-2222}"
+HTTP_PORT="${BATTLE_SH_VM_HTTP_PORT:-8080}"
+HTTPS_PORT="${BATTLE_SH_VM_HTTPS_PORT:-8443}"
+DOMAIN="${BATTLE_SH_VM_DOMAIN:-relay.local.test}"
+EMAIL="${BATTLE_SH_VM_EMAIL:-ops@example.com}"
+KEY_DIR="${BATTLE_SH_VM_KEY_DIR:-$ROOT/.scratch/practice-vm}"
+KEY="$KEY_DIR/id_ed25519"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/practice-vm <command>
+
+  up         Start a systemd Ubuntu container with SSH (fake cloud VM)
+  provision  Run ./scripts/provision-relay against that container
+  status     Show Relay + Caddy systemd status inside the container
+  smoke      Open a WebSocket to the Relay through Caddy (tls internal)
+  down       Stop and remove the container
+  doctor     up + provision + status + smoke
+
+Environment overrides: BATTLE_SH_VM_NAME, BATTLE_SH_VM_IMAGE,
+BATTLE_SH_VM_SSH_PORT, BATTLE_SH_VM_HTTP_PORT, BATTLE_SH_VM_HTTPS_PORT,
+BATTLE_SH_VM_DOMAIN, BATTLE_SH_VM_EMAIL, BATTLE_SH_VM_KEY_DIR
+EOF
+}
+
+need_docker() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "docker is required" >&2
+    exit 1
+  fi
+}
+
+ssh_opts=(
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o GlobalKnownHostsFile=/dev/null
+  -o LogLevel=ERROR
+  -o ConnectTimeout=10
+  -o IdentitiesOnly=yes
+  -i "$KEY"
+  -p "$SSH_PORT"
+)
+
+wait_for_ssh() {
+  local i
+  for i in $(seq 1 60); do
+    if ssh "${ssh_opts[@]}" root@127.0.0.1 true 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "SSH never became ready on 127.0.0.1:${SSH_PORT}" >&2
+  exit 1
+}
+
+cmd_up() {
+  need_docker
+  mkdir -p "$KEY_DIR"
+  if [[ ! -f "$KEY" ]]; then
+    ssh-keygen -t ed25519 -N "" -f "$KEY" -q
+  fi
+
+  if docker inspect "$NAME" >/dev/null 2>&1; then
+    echo "Container $NAME already exists; start it if stopped."
+    docker start "$NAME" >/dev/null || true
+  else
+    docker pull "$IMAGE"
+    docker run -d \
+      --name "$NAME" \
+      --privileged \
+      --cgroupns=host \
+      -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+      -p "${SSH_PORT}:22" \
+      -p "${HTTP_PORT}:80" \
+      -p "${HTTPS_PORT}:443" \
+      "$IMAGE" >/dev/null
+  fi
+
+  # Wait for systemd, then install + configure SSH.
+  for _ in $(seq 1 60); do
+    if docker exec "$NAME" systemctl is-system-running 2>/dev/null | grep -Eq 'running|degraded'; then
+      break
+    fi
+    sleep 1
+  done
+
+  docker exec "$NAME" bash -lc '
+    set -euo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq openssh-server rsync curl ca-certificates gnupg >/dev/null
+    mkdir -p /root/.ssh /run/sshd
+    chmod 700 /root/.ssh
+  '
+  docker cp "${KEY}.pub" "$NAME:/root/.ssh/authorized_keys"
+  docker exec "$NAME" bash -lc '
+    set -euo pipefail
+    chown root:root /root/.ssh /root/.ssh/authorized_keys
+    chmod 700 /root/.ssh
+    chmod 600 /root/.ssh/authorized_keys
+    sed -i "s/^#\\?PermitRootLogin.*/PermitRootLogin prohibit-password/" /etc/ssh/sshd_config
+    systemctl enable --now ssh
+    systemctl reload ssh || systemctl restart ssh
+  '
+
+  wait_for_ssh
+  echo "Practice VM ready."
+  echo "  SSH:  ssh -i $KEY -p $SSH_PORT root@127.0.0.1"
+  echo "  Next: $0 provision"
+}
+
+cmd_provision() {
+  need_docker
+  if [[ ! -f "$KEY" ]]; then
+    echo "No key at $KEY — run: $0 up" >&2
+    exit 1
+  fi
+  wait_for_ssh
+  # Map SSH options the provisioner understands (repeatable --ssh-option).
+  "$ROOT/scripts/provision-relay" \
+    --host "root@127.0.0.1" \
+    --domain "$DOMAIN" \
+    --email "$EMAIL" \
+    --tls-internal \
+    --ssh-option "Port=${SSH_PORT}" \
+    --ssh-option "IdentityFile=${KEY}" \
+    --ssh-option "IdentitiesOnly=yes" \
+    --ssh-option "StrictHostKeyChecking=no" \
+    --ssh-option "UserKnownHostsFile=/dev/null" \
+    --ssh-option "GlobalKnownHostsFile=/dev/null" \
+    --ssh-option "LogLevel=ERROR"
+}
+
+cmd_status() {
+  need_docker
+  docker exec "$NAME" systemctl --no-pager --full status battle-sh-relay.service caddy.service || true
+}
+
+cmd_smoke() {
+  need_docker
+  docker exec "$NAME" systemctl is-active --quiet battle-sh-relay.service
+  docker exec "$NAME" systemctl is-active --quiet caddy.service
+  # Inside the VM: point the practice domain at loopback, then WSS via Caddy.
+  docker exec "$NAME" bash -lc "
+    set -euo pipefail
+    grep -q '${DOMAIN}' /etc/hosts || echo '127.0.0.1 ${DOMAIN}' >> /etc/hosts
+    cd /opt/battle-sh
+    /root/.local/bin/uv run python - <<'PY'
+import asyncio
+import ssl
+import sys
+
+import websockets
+
+async def main() -> None:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    async with websockets.connect(
+        'wss://${DOMAIN}',
+        ssl=ctx,
+        open_timeout=15,
+    ) as ws:
+        await ws.ping()
+    print('smoke ok: WebSocket connected through Caddy to Relay')
+
+try:
+    asyncio.run(main())
+except Exception as exc:
+    print(f'smoke failed: {exc}', file=sys.stderr)
+    sys.exit(1)
+PY
+  "
+}
+
+cmd_down() {
+  need_docker
+  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  echo "Removed container $NAME"
+}
+
+cmd_doctor() {
+  cmd_up
+  cmd_provision
+  cmd_status
+  cmd_smoke
+}
+
+main() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    up) cmd_up ;;
+    provision) cmd_provision ;;
+    status) cmd_status ;;
+    smoke) cmd_smoke ;;
+    down) cmd_down ;;
+    doctor) cmd_doctor ;;
+    -h|--help|help|"") usage ;;
+    *)
+      echo "Unknown command: $cmd" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

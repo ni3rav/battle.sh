@@ -58,15 +58,29 @@ On a local Relay (commands above), in two terminals:
 5. Quit path: `q` or two-step Ctrl+C Abandons; opponent sees Abandoned; end screen shows frozen Match time.
 6. Optional: play through to Winner and confirm frozen Match time on the end screen.
 
-## Hosted Relay (`wss://` via Caddy + systemd)
+## Run a Relay on any cloud VM (`wss://`)
 
-Any SSH-able Linux VM works — there are no AWS-specific (or other cloud-vendor) create/destroy helpers. You bring the host; these scripts only install the Relay stack. Automated Caddy install uses **apt** (Debian/Ubuntu). On other distros, install Caddy yourself first, then re-run provision.
+You rent (or already have) a normal Linux virtual machine somewhere — DigitalOcean, Hetzner, AWS, a home box, whatever. This project does **not** create the VM for you and is not tied to one cloud. You point DNS at the machine, SSH in with our scripts, and they install the Relay.
 
-### DNS before certificates
+Works best on **Debian/Ubuntu** (the script can install Caddy with `apt`). On other distros, install Caddy yourself first, then run provision again.
 
-Create an **A** and/or **AAAA** record for your Relay domain that points at the VM **before** provisioning. Caddy obtains TLS certificates for that name; if DNS is missing or still propagating, certificate issuance will fail.
+### 1. Create a VM
 
-### Provision
+In your cloud console: start a small Ubuntu VM, note its public IP, and make sure you can SSH as root (or a user that can sudo — today the scripts assume you SSH as the user who can write `/opt` and manage systemd; root is simplest).
+
+Open ports **22** (SSH), **80**, and **443** on the firewall / security group.
+
+### 2. Point a domain at the VM
+
+Pick a hostname players will use, e.g. `relay.example.com`.
+
+In your DNS provider, create an **A** record (and **AAAA** if you use IPv6) from that name to the VM’s public IP. Wait until `dig +short relay.example.com` shows the right address.
+
+Do this **before** provisioning. Caddy asks Let’s Encrypt for a real certificate for that name; if DNS is wrong, certs fail and `wss://` will not work.
+
+### 3. Install the Relay from your laptop
+
+On your laptop (this repo), with SSH access to the VM:
 
 ```bash
 ./scripts/provision-relay \
@@ -75,9 +89,16 @@ Create an **A** and/or **AAAA** record for your Relay domain that points at the 
   --email you@example.com
 ```
 
-This installs **uv**, the Relay app under `/opt/battle-sh`, **Caddy** (HTTPS/WSS termination to `127.0.0.1:8765`), and a **systemd** unit (`battle-sh-relay.service`). Players then connect with `wss://relay.example.com`.
+That copies the app to `/opt/battle-sh`, installs **uv** and **Caddy** if needed, writes a systemd unit (`battle-sh-relay.service`), and starts Relay + Caddy. Caddy terminates HTTPS and forwards WebSockets to the Relay on `127.0.0.1:8765`.
 
-Dry-run (writes `Caddyfile` and the systemd unit locally, no SSH):
+Players then connect with:
+
+```bash
+uv run python -m battle_sh.ui host --relay wss://relay.example.com
+uv run python -m battle_sh.ui guest --relay wss://relay.example.com --invite PASTE_INVITE
+```
+
+Preview files without touching a machine:
 
 ```bash
 ./scripts/provision-relay \
@@ -88,10 +109,28 @@ Dry-run (writes `Caddyfile` and the systemd unit locally, no SSH):
   --output-dir /tmp/battle-sh-deploy
 ```
 
-### Deprovision
+### 4. Tear it down
 
 ```bash
 ./scripts/deprovision-relay --host root@YOUR_VM_IP
 ```
 
-Stops and disables the Relay and Caddy units, removes the Relay unit file, Caddyfile, and `/opt/battle-sh`. The Caddy OS package may remain installed; remove it with your package manager if you want it gone.
+Stops Relay and Caddy, removes the unit, Caddyfile, and `/opt/battle-sh`. The Caddy package may stay installed on the OS.
+
+### Practice the same flow in Docker (no real cloud)
+
+Want to rehearse provision without renting a VM? `scripts/practice-vm` boots a systemd Ubuntu container with SSH — a stand-in “cloud box” on your machine — then runs the real provision script against it.
+
+Docker is **not** how we deploy in production (uv + Caddy + systemd on a real host is). This is only a local practice VM. Because there is no public DNS, provision uses `--tls-internal` (Caddy’s local certificate). Real internet VMs should **not** pass that flag.
+
+```bash
+./scripts/practice-vm doctor    # up → provision → status → WebSocket smoke
+# or step by step:
+./scripts/practice-vm up
+./scripts/practice-vm provision
+./scripts/practice-vm status
+./scripts/practice-vm smoke
+./scripts/practice-vm down
+```
+
+SSH into the practice box: `ssh -i .scratch/practice-vm/id_ed25519 -p 2222 root@127.0.0.1`

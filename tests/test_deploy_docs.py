@@ -18,3 +18,5 @@ def test_readme_explains_dns_before_certs_and_local_ws() -> None:
     assert "provision" in text
     assert "deprovision" in text
     assert "player" in text
+    assert "practice-vm" in text or "docker" in text
+    assert "tls-internal" in text or "tls internal" in text

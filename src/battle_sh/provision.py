@@ -59,6 +59,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Remote uv binary path (default: {DEFAULT_UV_BIN})",
     )
     parser.add_argument(
+        "--tls-internal",
+        action="store_true",
+        help=(
+            "Use Caddy tls internal (self-signed). For Docker practice VMs "
+            "without public DNS. Do not use on a real internet-facing host."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Write Caddyfile and systemd unit locally; do not SSH",
@@ -85,11 +93,17 @@ def write_dry_run_artifacts(
     install_dir: str,
     port: int,
     uv_bin: str,
+    tls_internal: bool = False,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     upstream = f"127.0.0.1:{port}"
     (output_dir / "Caddyfile").write_text(
-        render_caddyfile(domain=domain, email=email, upstream=upstream)
+        render_caddyfile(
+            domain=domain,
+            email=email,
+            upstream=upstream,
+            tls_internal=tls_internal,
+        )
     )
     (output_dir / UNIT_NAME).write_text(
         render_relay_unit(
@@ -140,10 +154,16 @@ def provision_remote(
     port: int,
     uv_bin: str,
     ssh_options: list[str],
+    tls_internal: bool = False,
 ) -> None:
     root = _repo_root()
     upstream = f"127.0.0.1:{port}"
-    caddyfile = render_caddyfile(domain=domain, email=email, upstream=upstream)
+    caddyfile = render_caddyfile(
+        domain=domain,
+        email=email,
+        upstream=upstream,
+        tls_internal=tls_internal,
+    )
     unit = render_relay_unit(
         install_dir=install_dir,
         uv_bin=uv_bin,
@@ -204,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
             install_dir=args.install_dir,
             port=args.port,
             uv_bin=args.uv_bin,
+            tls_internal=args.tls_internal,
         )
         print(f"Dry-run artifacts written to {args.output_dir}")
         return 0
@@ -216,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         port=args.port,
         uv_bin=args.uv_bin,
         ssh_options=args.ssh_option,
+        tls_internal=args.tls_internal,
     )
     print(
         f"Provisioned Relay on {args.host}; Players should use wss://{args.domain}"
