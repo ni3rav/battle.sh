@@ -21,6 +21,39 @@ PLACEMENT_CONTROLS = """\
   [bold]q[/]              quit
 """
 
+WAIT_CONTROLS = """\
+[bold]Waiting[/]
+
+  [bold]q[/]              quit
+  [bold]Ctrl+C[/]          quit (twice)
+"""
+
+_SPINNER = ("|", "/", "-", "\\")
+
+
+def _three_band(
+    *,
+    top: RenderableType,
+    middle_left: RenderableType,
+    middle_right: RenderableType,
+    bottom: RenderableType,
+) -> Layout:
+    layout = Layout()
+    layout.split_column(
+        Layout(Panel(top, title="info", padding=(0, 1)), name="top", size=3),
+        Layout(name="middle", ratio=1),
+        Layout(Panel(bottom, title="status", padding=(0, 1)), name="bottom", size=3),
+    )
+    layout["middle"].split_row(
+        Layout(Panel(middle_left, title="board", padding=(0, 1)), name="board", ratio=3),
+        Layout(
+            Panel(middle_right, title="controls", padding=(0, 1)),
+            name="controls",
+            size=28,
+        ),
+    )
+    return layout
+
 
 def placement_frame(
     *,
@@ -30,16 +63,6 @@ def placement_frame(
     top_info: str = "Phase: Placement",
 ) -> RenderableType:
     """Compose the Placement three-band view (pure; no Live)."""
-    layout = Layout()
-    layout.split_column(
-        Layout(Panel(Text(top_info), title="info", padding=(0, 1)), name="top", size=3),
-        Layout(name="middle", ratio=1),
-        Layout(
-            Panel(Text(status or " "), title="status", padding=(0, 1)),
-            name="bottom",
-            size=3,
-        ),
-    )
     board = own_board_renderable(placement, {}, selected=selected)
     selected_line = (
         f"Selected: [bold yellow]{selected}[/]"
@@ -47,12 +70,49 @@ def placement_frame(
         else "No ship selected — press [bold]1-5[/] or [bold]tab[/]."
     )
     board_body: RenderableType = Group(board, Text.from_markup(selected_line))
-    layout["middle"].split_row(
-        Layout(Panel(board_body, title="board", padding=(0, 1)), name="board", ratio=3),
-        Layout(
-            Panel(Text.from_markup(PLACEMENT_CONTROLS), title="controls", padding=(0, 1)),
-            name="controls",
-            size=28,
-        ),
+    return _three_band(
+        top=Text(top_info),
+        middle_left=board_body,
+        middle_right=Text.from_markup(PLACEMENT_CONTROLS),
+        bottom=Text(status or " "),
     )
-    return layout
+
+
+def lobby_frame(
+    *,
+    role: str,
+    invite: str,
+    status: str = "Waiting for Guest…",
+) -> RenderableType:
+    """Host lobby: waiting for Guest; Match time has not started."""
+    top = Text(f"{role} · Lobby — waiting for Guest (Invite {invite})")
+    body = Text(
+        "Share the Invite with your opponent.\nMatch time starts when they join."
+    )
+    return _three_band(
+        top=top,
+        middle_left=body,
+        middle_right=Text.from_markup(WAIT_CONTROLS),
+        bottom=Text(status or " "),
+    )
+
+
+def wait_frame(
+    *,
+    role: str,
+    phase: str,
+    match_time: str,
+    spinner_frame: int = 0,
+    status: str = "Waiting…",
+    board: RenderableType | None = None,
+) -> RenderableType:
+    """Wait chrome with Match time and spinner; only quit keys in controls."""
+    spin = _SPINNER[spinner_frame % len(_SPINNER)]
+    top = Text(f"{role} · {phase} · Match time {match_time}  {spin}")
+    middle = board if board is not None else Text("Boards stay visible while you wait.")
+    return _three_band(
+        top=top,
+        middle_left=middle,
+        middle_right=Text.from_markup(WAIT_CONTROLS),
+        bottom=Text(status or " "),
+    )

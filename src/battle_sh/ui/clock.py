@@ -30,3 +30,13 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self._now += seconds
+
+
+def format_elapsed(seconds: float) -> str:
+    """Format Match elapsed time as ``m:ss`` (or ``h:mm:ss`` when needed)."""
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"

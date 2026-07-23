@@ -149,3 +149,61 @@ async def test_guest_ui_reports_abandoned_when_host_disconnects() -> None:
 
     joined = "\n".join(guest_io.outputs)
     assert "Abandoned" in joined
+
+
+async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
+    """q during wait-for-commitment closes the connection → Abandoned."""
+    from battle_sh.networking.connection import MatchConnection
+    from battle_sh.networking.relay import start_relay
+    from battle_sh.rules.placement import Placement, coordinate
+    from battle_sh.ui.play import ScriptedIO, run_host
+
+    def placement() -> Placement:
+        return Placement(
+            {
+                "Carrier": frozenset(coordinate(c, 1) for c in "ABCDE"),
+                "Battleship": frozenset(coordinate(c, 2) for c in "ABCD"),
+                "Cruiser": frozenset(coordinate(c, 3) for c in "ABC"),
+                "Submarine": frozenset(coordinate(c, 4) for c in "ABC"),
+                "Destroyer": frozenset(coordinate(c, 5) for c in "AB"),
+            }
+        )
+
+    host_io = ScriptedIO(inputs=deque(), keys=ScriptedKeySource(["y", "q"]))
+
+    async with start_relay(grace_seconds=0.05) as relay_url:
+        invite_holder: list[str] = []
+        guest_outcome: list[str] = []
+
+        async def host_task() -> None:
+            await run_host(
+                relay_url,
+                host_io,
+                placement_factory=placement,
+                on_invite=lambda inv: invite_holder.append(inv),
+                grace_seconds=0.05,
+            )
+
+        async def guest_task() -> None:
+            for _ in range(100):
+                if invite_holder:
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("Host never published Invite")
+            guest = await MatchConnection.connect(relay_url, grace_seconds=0.05)
+            try:
+                await guest.join_match(invite_holder[0])
+                await guest.wait_for_opponent_commitment()
+                end = await guest.wait_for_match_end()
+                guest_outcome.append(str(end.outcome))
+            finally:
+                await guest.close()
+
+        await asyncio.wait_for(
+            asyncio.gather(host_task(), guest_task()),
+            timeout=15,
+        )
+
+    assert any("Quitting" in o or "Abandoned" in o for o in host_io.outputs)
+    assert guest_outcome == ["abandoned"]

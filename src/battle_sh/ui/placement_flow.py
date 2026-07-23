@@ -14,7 +14,9 @@ from battle_sh.rules.placement import (
     translate_ship,
     validate_placement,
 )
+from battle_sh.ui.clock import Clock
 from battle_sh.ui.keys import Key, KeySource
+from battle_sh.ui.quit_arm import CTRL_C_WARN, QuitArm
 from battle_sh.ui.shell import placement_frame
 from rich.console import Console
 from rich.live import Live
@@ -44,6 +46,8 @@ def run_placement(
     on_message: Callable[[str], None] | None = None,
     placement_factory: Callable[[], Placement] | None = None,
     rng: random.Random | None = None,
+    top_info: Callable[[], str] | None = None,
+    clock: Clock | None = None,
 ) -> Placement:
     """Interactive Placement via immediate keys until the Player locks.
 
@@ -54,6 +58,7 @@ def run_placement(
     placement = factory()
     selected: str | None = None
     status = ""
+    arm = QuitArm(clock) if clock is not None else None
 
     def emit(text: str) -> None:
         nonlocal status
@@ -62,15 +67,19 @@ def run_placement(
             on_message(text)
 
     def frame():
+        info = top_info() if top_info is not None else "Phase: Placement"
         return placement_frame(
             placement=placement,
             selected=selected,
             status=status,
+            top_info=info,
         )
 
     def loop(live: Live | None) -> Placement:
         nonlocal placement, selected
         while True:
+            if arm is not None:
+                arm.expire_if_due()
             if live is not None:
                 live.update(frame(), refresh=True)
             key = keys.read()
@@ -78,6 +87,11 @@ def run_placement(
 
             if token == "q":
                 raise QuitRequested
+            if key.is_interrupt:
+                if arm is None or arm.handle_interrupt() == "confirm":
+                    raise QuitRequested
+                emit(CTRL_C_WARN)
+                continue
             if token == "y":
                 validate_placement(placement)
                 return placement
@@ -126,11 +140,13 @@ def run_placement(
     if console is None:
         return loop(None)
 
+    tick_clock = top_info is not None
     with Live(
-        frame(),
         console=console,
-        auto_refresh=False,
+        auto_refresh=tick_clock,
+        refresh_per_second=1,
         transient=False,
+        get_renderable=frame,
     ) as live:
         return loop(live)
 

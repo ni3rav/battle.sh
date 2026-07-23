@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 from battle_sh.networking.connection import (
     DuplicateShotError,
@@ -19,20 +20,25 @@ from battle_sh.networking.connection import (
 from battle_sh.networking.protocol import MatchOutcome
 from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import Coordinate, Placement
-from battle_sh.ui.boards import render_match_boards
-from battle_sh.ui.clock import Clock, FakeClock, SystemClock
+from battle_sh.ui.boards import own_board_renderable, render_match_boards
+from battle_sh.ui.clock import Clock, FakeClock, SystemClock, format_elapsed
 from battle_sh.ui.keys import KeySource, ScriptedKeySource, TerminalKeySource
 from battle_sh.ui.placement_flow import QuitRequested, run_placement
+from battle_sh.ui.shell import lobby_frame, wait_frame
+from battle_sh.ui.wait_flow import wait_honoring_quit
 from rich.console import Console
+from rich.live import Live
 from websockets.exceptions import ConnectionClosed
+
+T = TypeVar("T")
 
 
 @dataclass
 class ScriptedIO:
     """Injectable line IO for tests — records printed text, feeds scripted inputs.
 
-    ``keys`` and ``clock`` sit beside line ``ask`` so later Match UI work can
-    drive immediate keys and time without a real TTY (no UX rewrite yet).
+    ``keys`` and ``clock`` sit beside line ``ask`` so Match UI work can drive
+    immediate keys and time without a real TTY.
     """
 
     inputs: deque[str]
@@ -83,18 +89,31 @@ async def run_host(
         if on_invite is not None:
             on_invite(invite)
         io.print(f"Invite code (share with your opponent): {invite}")
-        io.print("Waiting for Guest to join…")
-        await conn.wait_for_player_joined()
+
+        await _live_wait(
+            io,
+            conn.wait_for_player_joined(),
+            frame=lambda status, spin: lobby_frame(
+                role="Host",
+                invite=invite,
+                status=status or "Waiting for Guest…",
+            ),
+            initial_status="Waiting for Guest…",
+        )
+        match_started_at = io.clock.now()
         io.print("Guest joined.")
 
-        placement = run_placement(
-            io.keys,
-            console=io.console,
+        placement = _run_placement_with_match_time(
+            io,
+            role="Host",
+            match_started_at=match_started_at,
             placement_factory=placement_factory,
         )
         await conn.lock_placement(placement)
-        io.print("Layout locked. Waiting for opponent to lock theirs…")
-        await conn.wait_for_opponent_commitment()
+
+        await _wait_for_opponent_commitment(
+            io, conn, "Host", match_started_at, placement
+        )
         io.print("Both ready. You fire first.")
 
         await _play_match(conn, placement, io)
@@ -116,16 +135,18 @@ async def run_guest(
     conn = await MatchConnection.connect(relay_url, grace_seconds=grace_seconds)
     try:
         await conn.join_match(invite)
+        match_started_at = io.clock.now()
         io.print(f"Joined Match with Invite {invite}.")
 
-        placement = run_placement(
-            io.keys,
-            console=io.console,
+        placement = _run_placement_with_match_time(
+            io,
+            role="Guest",
+            match_started_at=match_started_at,
             placement_factory=placement_factory,
         )
         await conn.lock_placement(placement)
-        io.print("Layout locked. Waiting for opponent to lock theirs…")
-        await conn.wait_for_opponent_commitment()
+
+        await _wait_for_opponent_commitment(io, conn, "Guest", match_started_at, placement)
         io.print("Both ready. Waiting for Host's first shot…")
 
         await _play_match(conn, placement, io)
@@ -133,6 +154,83 @@ async def run_guest(
         io.print("Quitting. Match Abandoned for your opponent.")
     finally:
         await conn.close()
+
+
+async def _wait_for_opponent_commitment(
+    io: LiveIO | ScriptedIO,
+    conn: MatchConnection,
+    role: str,
+    match_started_at: float,
+    placement: Placement,
+) -> None:
+    await _live_wait(
+        io,
+        conn.wait_for_opponent_commitment(),
+        frame=lambda status, spin: wait_frame(
+            role=role,
+            phase="Waiting for opponent Placement",
+            match_time=format_elapsed(io.clock.now() - match_started_at),
+            spinner_frame=spin,
+            status=status or "Waiting for opponent to lock…",
+            board=own_board_renderable(placement, {}),
+        ),
+        initial_status="Waiting for opponent to lock…",
+    )
+
+
+def _run_placement_with_match_time(
+    io: LiveIO | ScriptedIO,
+    *,
+    role: str,
+    match_started_at: float,
+    placement_factory: Callable[[], Placement] | None,
+) -> Placement:
+    def top_info() -> str:
+        elapsed = format_elapsed(io.clock.now() - match_started_at)
+        return f"{role} · Placement · Match time {elapsed}"
+
+    return run_placement(
+        io.keys,
+        console=io.console,
+        placement_factory=placement_factory,
+        top_info=top_info,
+        clock=io.clock,
+    )
+
+
+async def _live_wait(
+    io: LiveIO | ScriptedIO,
+    awaitable: Awaitable[T],
+    *,
+    frame: Callable[[str, int], object],
+    initial_status: str,
+) -> T:
+    status = initial_status
+    spin = 0
+
+    def on_message(text: str) -> None:
+        nonlocal status
+        status = text
+
+    with Live(
+        frame(status, spin),  # type: ignore[arg-type]
+        console=io.console,
+        auto_refresh=False,
+        transient=False,
+    ) as live:
+
+        def on_tick() -> None:
+            nonlocal spin
+            spin += 1
+            live.update(frame(status, spin), refresh=True)  # type: ignore[arg-type]
+
+        return await wait_honoring_quit(
+            awaitable,
+            keys=io.keys,
+            clock=io.clock,
+            on_message=on_message,
+            on_tick=on_tick,
+        )
 
 
 async def _play_match(
