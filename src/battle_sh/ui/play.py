@@ -253,6 +253,7 @@ async def _play_match(
     revealed: set[Coordinate] = set()
     verification_ok: bool | None = None
     last_shot: Coordinate | None = None
+    frozen_match_time: str | None = None
 
     def boards() -> CombatBoards:
         return CombatBoards(
@@ -264,6 +265,12 @@ async def _play_match(
 
     def elapsed() -> str:
         return format_elapsed(io.clock.now() - match_started_at)
+
+    def freeze_match_time() -> str:
+        nonlocal frozen_match_time
+        if frozen_match_time is None:
+            frozen_match_time = elapsed()
+        return frozen_match_time
 
     try:
         while conn.match_end is None:
@@ -281,6 +288,7 @@ async def _play_match(
                 if report.verification_ok is not None:
                     verification_ok = report.verification_ok
                 if report.match_end is not None:
+                    freeze_match_time()
                     break
             else:
                 report = await _live_wait(
@@ -296,27 +304,37 @@ async def _play_match(
                     initial_status="Waiting for opponent…",
                 )
                 if report.match_end is not None:
+                    freeze_match_time()
                     break
                 io.print(_format_shot_feedback(report, outgoing=False))
                 _apply_incoming(report, own_marks)
     except (ConnectionClosed, asyncio.TimeoutError, MatchConnectionError) as exc:
         io.print(f"Connection issue: {exc}")
+        match_time = freeze_match_time()
         end = await conn.wait_for_match_end()
-        _announce_end(io, end.outcome, end.winner, verification_ok, conn.role)
+        _announce_end(
+            io, end.outcome, end.winner, verification_ok, conn.role, match_time
+        )
         return
     except RevealVerificationError as exc:
         io.print(f"Commitment verification failed: {exc}")
         verification_ok = False
+        match_time = freeze_match_time()
         end = conn.match_end
         if end is None:
             end = await conn.wait_for_match_end()
-        _announce_end(io, end.outcome, end.winner, verification_ok, conn.role)
+        _announce_end(
+            io, end.outcome, end.winner, verification_ok, conn.role, match_time
+        )
         return
 
+    match_time = freeze_match_time()
     end = conn.match_end
     if end is None:
         end = await conn.wait_for_match_end()
-    _announce_end(io, end.outcome, end.winner, verification_ok, conn.role)
+    _announce_end(
+        io, end.outcome, end.winner, verification_ok, conn.role, match_time
+    )
 
 
 async def _take_shot_until_legal(
@@ -406,6 +424,7 @@ def _announce_end(
     winner: str | None,
     verification_ok: bool | None,
     role: str | None,
+    match_time: str,
 ) -> None:
     if outcome == MatchOutcome.ABANDONED:
         io.print("Match Abandoned (no Winner).")
@@ -414,6 +433,7 @@ def _announce_end(
             io.print("You win!")
         else:
             io.print(f"Winner: {winner}.")
+    io.print(f"Match time {match_time}")
     if verification_ok is True:
         io.print("Commitment verification: OK.")
     elif verification_ok is False:

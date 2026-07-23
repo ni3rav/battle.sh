@@ -33,7 +33,30 @@ uv run python -m battle_sh.ui host --relay ws://127.0.0.1:8765
 uv run python -m battle_sh.ui guest --relay ws://127.0.0.1:8765 --invite PASTE_INVITE
 ```
 
-Placement uses immediate keys (no Enter): a random layout is ready by default. Press `1`–`5` or Tab/Shift+Tab to select a ship, `w/a/s/d` or arrows to move, `e` or `r` to flip orientation, `t` to re-roll, `y` to lock, `q` to quit. During combat, Aim with `w/a/s/d` or arrows (skips already-fired cells), fire with `f` / Enter / Space, or `q` to quit. Caddy and TLS are not required for local play.
+### Live Match UI
+
+Fixed **three-band** layout: top = Match/role/turn + Match time; middle = wide board | phase-aware controls; bottom = status/errors. Match time starts when the Guest joins (not during Host lobby wait) and freezes on the Winner/Abandoned end screen.
+
+### Key map
+
+| Phase | Keys |
+| --- | --- |
+| Placement | `1`–`5` or Tab / Shift+Tab select ship; `w/a/s/d` or arrows move; `e` / `r` flip H↔V; `t` re-roll; `y` lock |
+| Combat | `w/a/s/d` or arrows Aim (skips fired cells); `f` / Enter / Space fire |
+| Any Live phase | `q` quit (Abandon); first Ctrl+C warns, second within ~3s Abandons (arm auto-clears) |
+
+Waiting turns show a spinner; only `q` and Ctrl+C are honored. Invite for Guest stays CLI `--invite` (or a one-shot paste before Live UI). Caddy and TLS are not required for local play.
+
+### Manual Host/Guest smoke checklist
+
+On a local Relay (commands above), in two terminals:
+
+1. Host creates a Match; confirm lobby shows waiting-for-Guest (no Match time yet).
+2. Guest joins with `--invite`; both see Match time start; three-band chrome stays stable.
+3. Placement: move/rotate/re-roll with keys, then `y` to lock; opponent wait shows spinner.
+4. Combat: Aim with arrows/WASD, fire with `f`; confirm skip over already-fired cells.
+5. Quit path: `q` or two-step Ctrl+C Abandons; opponent sees Abandoned; end screen shows frozen Match time.
+6. Optional: play through to Winner and confirm frozen Match time on the end screen.
 
 ## Hosted Relay (`wss://` via Caddy + systemd)
 

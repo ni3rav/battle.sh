@@ -12,6 +12,7 @@ from battle_sh.networking.relay import start_relay
 from battle_sh.rules.board import parse_coordinate
 from battle_sh.rules.placement import Coordinate, Placement, coordinate
 from battle_sh.ui.aim_flow import initial_aim, step_skipping_fired
+from battle_sh.ui.clock import FakeClock
 from battle_sh.ui.keys import ScriptedKeySource
 from battle_sh.ui.play import ScriptedIO, run_guest, run_host
 
@@ -126,10 +127,12 @@ async def test_host_and_guest_sessions_complete_a_winner_match() -> None:
     host_io = ScriptedIO(
         inputs=deque(),
         keys=ScriptedKeySource(_combat_key_script(guest_targets)),
+        clock=FakeClock(start=0.0),
     )
     guest_io = ScriptedIO(
         inputs=deque(),
         keys=ScriptedKeySource(_combat_key_script(guest_misses)),
+        clock=FakeClock(start=0.0),
     )
 
     async with start_relay() as relay_url:
@@ -165,10 +168,15 @@ async def test_host_and_guest_sessions_complete_a_winner_match() -> None:
     joined = "\n".join(host_io.outputs + guest_io.outputs)
     assert "Winner" in joined
     assert "Commitment verification" in joined
+    assert "Match time 0:00" in "\n".join(host_io.outputs)
+    assert "Match time 0:00" in "\n".join(guest_io.outputs)
 
 
 async def test_guest_ui_reports_abandoned_when_host_disconnects() -> None:
-    guest_io = ScriptedIO(inputs=deque(), keys=ScriptedKeySource(["y"]))
+    clock = FakeClock(start=0.0)
+    guest_io = ScriptedIO(
+        inputs=deque(), keys=ScriptedKeySource(["y"]), clock=clock
+    )
 
     async with start_relay(grace_seconds=0.05) as relay_url:
         host = await MatchConnection.connect(relay_url, grace_seconds=0.05)
@@ -188,11 +196,12 @@ async def test_guest_ui_reports_abandoned_when_host_disconnects() -> None:
         await host.lock_placement(_placement_a())
         # Guest locks via UI; wait until Host has opponent commitment
         await host.wait_for_opponent_commitment()
+        clock.advance(65.0)
         await host.close()
         await asyncio.wait_for(guest, timeout=10)
 
-    joined = "\n".join(guest_io.outputs)
-    assert "Abandoned" in joined
+    assert "Abandoned" in "\n".join(guest_io.outputs)
+    assert "Match time 1:05" in guest_io.outputs
 
 
 async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
