@@ -6,7 +6,7 @@ import hashlib
 import json
 import random
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal
 
 
 COLUMNS = "ABCDEFGHIJ"
@@ -180,7 +180,7 @@ def random_placement(rng: random.Random | None = None) -> Placement:
                             cells = ship_cells_from_bow(
                                 coordinate(col, row),
                                 length,
-                                cast(Orientation, orientation),
+                                orientation,
                             )
                         except IllegalPlacementError:
                             continue

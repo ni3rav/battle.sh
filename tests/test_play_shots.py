@@ -205,7 +205,8 @@ async def test_commitment_mismatch_on_fleet_reveal_is_reported() -> None:
         host, guest = await _ready_match(relay_url)
         try:
             # Commitment was for placement_b; answer/reveal as placement_a instead.
-            guest._board = Board(_placement_a())
+            # Intentionally replace the defender board to force a Reveal mismatch.
+            guest._board = Board(_placement_a())  # pyright: ignore[reportPrivateUsage]
             targets = [
                 "A1",
                 "A2",  # Destroyer

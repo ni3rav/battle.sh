@@ -20,6 +20,8 @@ from battle_sh.networking.protocol import MatchOutcome
 from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import Coordinate, Placement
 from battle_sh.ui.boards import render_match_boards
+from battle_sh.ui.clock import Clock, FakeClock, SystemClock
+from battle_sh.ui.keys import KeySource, ScriptedKeySource
 from battle_sh.ui.placement_flow import QuitRequested, run_placement
 from rich.console import Console
 from websockets.exceptions import ConnectionClosed
@@ -27,13 +29,19 @@ from websockets.exceptions import ConnectionClosed
 
 @dataclass
 class ScriptedIO:
-    """Injectable line IO for tests — records printed text, feeds scripted inputs."""
+    """Injectable line IO for tests — records printed text, feeds scripted inputs.
+
+    ``keys`` and ``clock`` sit beside line ``ask`` so later Match UI work can
+    drive immediate keys and time without a real TTY (no UX rewrite yet).
+    """
 
     inputs: deque[str]
-    outputs: list[str] = field(default_factory=list)
+    outputs: list[str] = field(default_factory=list[str])
     console: Console = field(
         default_factory=lambda: Console(record=True, force_terminal=True)
     )
+    keys: KeySource = field(default_factory=lambda: ScriptedKeySource([]))
+    clock: Clock = field(default_factory=FakeClock)
 
     def print(self, *args: object, **kwargs: object) -> None:
         text = " ".join(str(a) for a in args)
@@ -50,6 +58,7 @@ class ScriptedIO:
 @dataclass
 class LiveIO:
     console: Console = field(default_factory=Console)
+    clock: Clock = field(default_factory=SystemClock)
 
     def print(self, *args: object, **kwargs: object) -> None:
         self.console.print(*args, **kwargs)  # type: ignore[arg-type]

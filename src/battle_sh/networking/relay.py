@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
@@ -35,8 +35,10 @@ class _Match:
 
 @dataclass
 class _RelayState:
-    matches: dict[str, _Match] = field(default_factory=dict)
-    seats: dict[ServerConnection, tuple[str, Role]] = field(default_factory=dict)
+    matches: dict[str, _Match] = field(default_factory=dict[str, _Match])
+    seats: dict[ServerConnection, tuple[str, Role]] = field(
+        default_factory=dict[ServerConnection, tuple[str, Role]]
+    )
     grace_seconds: float = 30.0
 
 
@@ -167,13 +169,16 @@ async def _handle_reconnect(
             error_message(ErrorCode.MALFORMED_INVITE, "Invite must be a non-empty string"),
         )
         return
-    if role not in ("host", "guest"):
+    if role == "host":
+        claimed_role: Role = "host"
+    elif role == "guest":
+        claimed_role = "guest"
+    else:
         await _send(
             ws,
             error_message(ErrorCode.MALFORMED_MESSAGE, "Role must be host or guest"),
         )
         return
-    claimed_role = cast(Role, role)
     match = state.matches.get(invite)
     if match is None or match.ended:
         await _send(ws, error_message(ErrorCode.UNKNOWN_INVITE, "Unknown Invite"))
@@ -301,7 +306,7 @@ async def start_relay(
     port: int = 0,
     *,
     grace_seconds: float = 30.0,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     """Start a local Relay; yield a ws:// URL callers can connect to."""
     state = _RelayState(grace_seconds=grace_seconds)
 

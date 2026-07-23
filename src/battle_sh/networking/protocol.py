@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 
 class MsgType(StrEnum):
@@ -56,7 +56,7 @@ def decode(raw: str) -> dict[str, Any]:
         raise ValueError("Message must be a JSON object")
     if "type" not in data:
         raise ValueError("Message missing type")
-    return data
+    return cast(dict[str, Any], data)
 
 
 def error_message(code: ErrorCode, message: str) -> dict[str, Any]:

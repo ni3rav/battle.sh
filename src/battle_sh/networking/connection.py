@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Self
+from typing import Any, Self, cast
 
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
@@ -78,8 +78,8 @@ class MatchConnection:
     _role: Role | None = None
     _board: Board | None = None
     _my_turn: bool = False
-    _outgoing: set[Coordinate] = field(default_factory=set)
-    _opponent_answers: list[ShotAnswer] = field(default_factory=list)
+    _outgoing: set[Coordinate] = field(default_factory=set[Coordinate])
+    _opponent_answers: list[ShotAnswer] = field(default_factory=list[ShotAnswer])
     _match_end: MatchEnd | None = None
 
     @classmethod
@@ -364,9 +364,14 @@ class MatchConnection:
         if ship is not None and message.get("ship") != ship:
             raise MatchConnectionError("unexpected", "Reveal ship mismatch")
         cells = message.get("cells")
-        if not isinstance(cells, list) or not all(isinstance(c, str) for c in cells):
+        if not isinstance(cells, list):
             raise MatchConnectionError("unexpected", "Reveal missing cells")
-        return list(cells)
+        typed_cells: list[str] = []
+        for cell in cast(list[Any], cells):
+            if not isinstance(cell, str):
+                raise MatchConnectionError("unexpected", "Reveal missing cells")
+            typed_cells.append(cell)
+        return typed_cells
 
     def _verify_full_reveal(self, message: dict[str, Any]) -> None:
         if message.get("scope") != "fleet":
@@ -376,9 +381,19 @@ class MatchConnection:
             raise MatchConnectionError("unexpected", "Fleet Reveal missing ships")
         if self._opponent_commitment is None:
             raise MatchConnectionError("unexpected", "No opponent commitment")
-        placement = placement_from_reveal(
-            {name: list(cells) for name, cells in ships.items()}
-        )
+        typed_ships: dict[str, list[str]] = {}
+        for name, cells in cast(dict[Any, Any], ships).items():
+            if not isinstance(name, str) or not isinstance(cells, list):
+                raise MatchConnectionError("unexpected", "Fleet Reveal missing ships")
+            typed_cells: list[str] = []
+            for cell in cast(list[Any], cells):
+                if not isinstance(cell, str):
+                    raise MatchConnectionError(
+                        "unexpected", "Fleet Reveal missing ships"
+                    )
+                typed_cells.append(cell)
+            typed_ships[name] = typed_cells
+        placement = placement_from_reveal(typed_ships)
         verify_fleet_reveal(placement, self._opponent_commitment)
         verify_shot_answers_against_placement(placement, self._opponent_answers)
 

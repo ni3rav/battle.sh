@@ -50,6 +50,7 @@ async def test_disconnect_then_reconnect_within_grace_resumes_same_match() -> No
             await guest.join_match(invite)
             await host.wait_for_player_joined()
             guest_role = guest.role
+            assert guest_role is not None
 
             await guest.close()
 

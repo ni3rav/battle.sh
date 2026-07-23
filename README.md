@@ -4,6 +4,18 @@ Terminal two-player Battleship over an operator-owned WebSocket Relay.
 
 ## Local development (`ws://`, no Caddy)
 
+### Checks
+
+Same gates as CI:
+
+```bash
+uv sync --group dev
+uv run pyright
+uv run pytest
+```
+
+### Play
+
 Run the Relay on loopback, then open two terminals as Host and Guest:
 
 ```bash
