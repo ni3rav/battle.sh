@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from battle_sh.rules.board import ShotResultKind
 from battle_sh.rules.placement import Coordinate, Placement
 from battle_sh.ui.boards import own_board_renderable, tracking_board_renderable
@@ -39,6 +41,16 @@ WAIT_CONTROLS = """\
 """
 
 _SPINNER = ("|", "/", "-", "\\")
+
+
+@dataclass(frozen=True)
+class CombatBoards:
+    """Own + tracking Board state shared by combat Aim and wait frames."""
+
+    placement: Placement
+    own_marks: dict[Coordinate, ShotResultKind]
+    tracking: dict[Coordinate, ShotResultKind]
+    revealed: frozenset[Coordinate]
 
 
 def _three_band(
@@ -133,21 +145,20 @@ def combat_frame(
     *,
     role: str,
     match_time: str,
-    placement: Placement,
-    own_marks: dict[Coordinate, ShotResultKind],
-    tracking: dict[Coordinate, ShotResultKind],
-    revealed: frozenset[Coordinate],
+    boards: CombatBoards,
     aim: Coordinate,
     status: str = "",
 ) -> RenderableType:
     """Your turn: opponent Board + Aim wide; own Board compact in the top strip."""
     info = Text(f"{role} · Aim · Match time {match_time}")
-    own = own_board_renderable(placement, own_marks)
+    own = own_board_renderable(boards.placement, boards.own_marks)
     top: RenderableType = Group(info, Text(""), own)
     return _three_band(
         top=top,
         top_size=16,
-        middle_left=tracking_board_renderable(tracking, revealed, aim=aim),
+        middle_left=tracking_board_renderable(
+            boards.tracking, boards.revealed, aim=aim
+        ),
         middle_right=Text.from_markup(AIM_CONTROLS),
         bottom=Text(status or " "),
     )
@@ -157,23 +168,20 @@ def combat_wait_frame(
     *,
     role: str,
     match_time: str,
-    placement: Placement,
-    own_marks: dict[Coordinate, ShotResultKind],
-    tracking: dict[Coordinate, ShotResultKind],
-    revealed: frozenset[Coordinate],
+    boards: CombatBoards,
     spinner_frame: int = 0,
     status: str = "Waiting for opponent…",
 ) -> RenderableType:
     """Opponent's turn: Aim board wide, own Board in top strip, spinner in status."""
     spin = _SPINNER[spinner_frame % len(_SPINNER)]
     info = Text(f"{role} · Waiting · Match time {match_time}")
-    own = own_board_renderable(placement, own_marks)
+    own = own_board_renderable(boards.placement, boards.own_marks)
     top: RenderableType = Group(info, Text(""), own)
     status_line = f"{spin} {status}" if status else spin
     return _three_band(
         top=top,
         top_size=16,
-        middle_left=tracking_board_renderable(tracking, revealed),
+        middle_left=tracking_board_renderable(boards.tracking, boards.revealed),
         middle_right=Text.from_markup(WAIT_CONTROLS),
         bottom=Text(status_line),
     )

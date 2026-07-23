@@ -10,7 +10,8 @@ import pytest
 from battle_sh.networking.connection import MatchConnection
 from battle_sh.networking.relay import start_relay
 from battle_sh.rules.board import parse_coordinate
-from battle_sh.rules.placement import COLUMNS, ROWS, Coordinate, Placement, coordinate
+from battle_sh.rules.placement import Coordinate, Placement, coordinate
+from battle_sh.ui.aim_flow import initial_aim, step_skipping_fired
 from battle_sh.ui.keys import ScriptedKeySource
 from battle_sh.ui.play import ScriptedIO, run_guest, run_host
 
@@ -39,36 +40,6 @@ def _placement_b() -> Placement:
     )
 
 
-def _initial_aim(start: Coordinate | None, fired: frozenset[Coordinate]) -> Coordinate:
-    preferred = start if start is not None else coordinate("A", 1)
-    if preferred not in fired:
-        return preferred
-    cells = [coordinate(col, row) for row in ROWS for col in COLUMNS]
-    start_idx = cells.index(preferred)
-    for cell in cells[start_idx + 1 :] + cells[:start_idx]:
-        if cell not in fired:
-            return cell
-    raise RuntimeError("No empty cells left")
-
-
-def _step(
-    current: Coordinate,
-    column_delta: int,
-    row_delta: int,
-    fired: frozenset[Coordinate],
-) -> Coordinate | None:
-    col_i = COLUMNS.index(current.column)
-    row = current.row
-    while True:
-        col_i += column_delta
-        row += row_delta
-        if col_i < 0 or col_i >= len(COLUMNS) or row not in ROWS:
-            return None
-        cell = coordinate(COLUMNS[col_i], row)
-        if cell not in fired:
-            return cell
-
-
 def _aim_keys_for(
     target: Coordinate,
     *,
@@ -77,7 +48,7 @@ def _aim_keys_for(
 ) -> list[str]:
     """WASD + f sequence that Aims at ``target`` given last Shot and fired set."""
     frozen = frozenset(fired)
-    start = _initial_aim(last, frozen)
+    start = initial_aim(last, frozen)
     if start == target:
         return ["f"]
 
@@ -87,7 +58,7 @@ def _aim_keys_for(
     while queue:
         cur, path = queue.popleft()
         for name, dc, dr in moves:
-            nxt = _step(cur, dc, dr, frozen)
+            nxt = step_skipping_fired(cur, dc, dr, frozen)
             if nxt is None or nxt in seen:
                 continue
             new_path = [*path, name]

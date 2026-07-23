@@ -110,6 +110,24 @@ async def test_wait_honoring_quit_completes_when_awaitable_finishes() -> None:
     assert result == "ok"
 
 
+async def test_combat_wait_ignores_aim_keys_until_awaitable_done() -> None:
+    """Opponent-turn wait consumes Aim keys via try_read and ignores them."""
+    clock = FakeClock()
+    # poll_all=True mimics Terminal: wait sees w/f/d and must not quit on them.
+    keys = ScriptedKeySource(["w", "f", "d"], poll_all=True)
+
+    async def done_soon() -> str:
+        # Longer than a few poll_timeout cycles so try_read drains Aim keys.
+        await asyncio.sleep(0.25)
+        return "served"
+
+    result = await wait_honoring_quit(done_soon(), keys=keys, clock=clock)
+    assert result == "served"
+    # Keys were polled and discarded by the wait loop (not left for Aim).
+    with pytest.raises(EOFError):
+        keys.read()
+
+
 async def test_wait_honoring_quit_q_raises_quit_requested() -> None:
     clock = FakeClock()
     keys = ScriptedKeySource(["q"])

@@ -27,6 +27,23 @@ class Key:
 
 INTERRUPT = Key("ctrl+c")
 
+# WASD + arrows → (column_delta, row_delta) for Placement and Aim movement.
+MOVE_DELTA: dict[str, tuple[int, int]] = {
+    "w": (0, -1),
+    "a": (-1, 0),
+    "s": (0, 1),
+    "d": (1, 0),
+    "up": (0, -1),
+    "left": (-1, 0),
+    "down": (0, 1),
+    "right": (1, 0),
+}
+
+
+def key_token(key: Key) -> str:
+    """Stable lowercase token for key handling (``shift+tab`` stays intact)."""
+    return key.name.lower()
+
 
 class KeySource(Protocol):
     """Supplies immediate key events for Placement, Aim, and wait loops."""
@@ -39,10 +56,15 @@ class KeySource(Protocol):
 class ScriptedKeySource:
     """Test double: yields a predetermined key sequence without a terminal."""
 
-    def __init__(self, keys: Iterable[Key | str]) -> None:
+    def __init__(
+        self, keys: Iterable[Key | str], *, poll_all: bool = False
+    ) -> None:
         self._keys: deque[Key] = deque(
             key if isinstance(key, Key) else Key(key) for key in keys
         )
+        # When True, try_read surfaces every key (for wait-loop ignore tests).
+        # Default False keeps Placement/Aim keys available for read() during waits.
+        self._poll_all = poll_all
 
     def read(self) -> Key:
         if not self._keys:
@@ -52,15 +74,20 @@ class ScriptedKeySource:
     def try_read(self, timeout: float = 0.0) -> Key | None:
         """Non-blocking poll for wait loops.
 
-        Scripted sources only surface ``q`` / Ctrl+C here so Placement/Aim
-        keys remain available for ``read()``. Terminal sources return any
-        ready key (callers ignore non-quit keys while waiting).
+        By default, scripted sources only surface ``q`` / Ctrl+C here so
+        Placement/Aim keys remain available for ``read()``. Pass
+        ``poll_all=True`` to surface every key (Terminal-like) for tests that
+        assert wait loops ignore non-quit input.
         """
         del timeout  # scripted source is non-blocking; empty means no key yet
         if not self._keys:
             return None
         front = self._keys[0]
-        if front.name.lower() == "q" or front.is_interrupt:
+        if (
+            self._poll_all
+            or front.name.lower() == "q"
+            or front.is_interrupt
+        ):
             return self._keys.popleft()
         return None
 

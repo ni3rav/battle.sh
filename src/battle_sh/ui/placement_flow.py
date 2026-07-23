@@ -15,7 +15,7 @@ from battle_sh.rules.placement import (
     validate_placement,
 )
 from battle_sh.ui.clock import Clock
-from battle_sh.ui.keys import Key, KeySource
+from battle_sh.ui.keys import MOVE_DELTA, KeySource, key_token
 from battle_sh.ui.quit_arm import CTRL_C_WARN, QuitArm
 from battle_sh.ui.shell import placement_frame
 from rich.console import Console
@@ -23,16 +23,6 @@ from rich.live import Live
 
 _SHIP_ORDER = tuple(STANDARD_FLEET_LENGTHS)
 _SHIP_BY_INDEX = {str(i): name for i, name in enumerate(_SHIP_ORDER, start=1)}
-_MOVE_DELTA = {
-    "w": (0, -1),
-    "a": (-1, 0),
-    "s": (0, 1),
-    "d": (1, 0),
-    "up": (0, -1),
-    "left": (-1, 0),
-    "down": (0, 1),
-    "right": (1, 0),
-}
 
 
 class QuitRequested(Exception):
@@ -83,7 +73,7 @@ def run_placement(
             if live is not None:
                 live.update(frame(), refresh=True)
             key = keys.read()
-            token = _key_token(key)
+            token = key_token(key)
 
             if token == "q":
                 raise QuitRequested
@@ -121,11 +111,11 @@ def run_placement(
                 except IllegalPlacementError:
                     emit("Can't rotate there.")
                 continue
-            if token in _MOVE_DELTA:
+            if token in MOVE_DELTA:
                 if selected is None:
                     emit("Select a ship first (1-5).")
                     continue
-                delta = _MOVE_DELTA[token]
+                delta = MOVE_DELTA[token]
                 try:
                     placement = translate_ship(
                         placement,
@@ -149,12 +139,6 @@ def run_placement(
         get_renderable=frame,
     ) as live:
         return loop(live)
-
-
-def _key_token(key: Key) -> str:
-    if key.name == "shift+tab":
-        return "shift+tab"
-    return key.name.lower()
 
 
 def _cycle_ship(selected: str | None, *, step: int) -> str:

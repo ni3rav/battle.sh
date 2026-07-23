@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from battle_sh.rules.board import ShotResultKind
 from battle_sh.rules.placement import Coordinate, Placement, coordinate
-from battle_sh.ui.shell import combat_frame, combat_wait_frame
+from battle_sh.ui.shell import CombatBoards, combat_frame, combat_wait_frame
 from rich.console import Console
 
 
@@ -20,6 +20,19 @@ def _fixed_placement() -> Placement:
     )
 
 
+def _boards(
+    *,
+    own_marks: dict[Coordinate, ShotResultKind] | None = None,
+    tracking: dict[Coordinate, ShotResultKind] | None = None,
+) -> CombatBoards:
+    return CombatBoards(
+        placement=_fixed_placement(),
+        own_marks=own_marks or {},
+        tracking=tracking or {},
+        revealed=frozenset(),
+    )
+
+
 def _export(frame: object) -> str:
     console = Console(record=True, width=100, height=28, force_terminal=True)
     console.print(frame)  # type: ignore[arg-type]
@@ -27,16 +40,15 @@ def _export(frame: object) -> str:
 
 
 def test_combat_frame_opponent_wide_own_compact_aim_controls() -> None:
-    tracking: dict[Coordinate, ShotResultKind] = {coordinate("B", 7): "miss"}
-    own_marks: dict[Coordinate, ShotResultKind] = {coordinate("A", 1): "hit"}
+    boards = _boards(
+        tracking={coordinate("B", 7): "miss"},
+        own_marks={coordinate("A", 1): "hit"},
+    )
     text = _export(
         combat_frame(
             role="Host",
             match_time="0:42",
-            placement=_fixed_placement(),
-            own_marks=own_marks,
-            tracking=tracking,
-            revealed=frozenset(),
+            boards=boards,
             aim=coordinate("C", 5),
             status="Your turn",
         )
@@ -44,11 +56,8 @@ def test_combat_frame_opponent_wide_own_compact_aim_controls() -> None:
     assert "Host" in text
     assert "Match time 0:42" in text
     assert "Your turn" in text or "Aim" in text
-    # Opponent / Aim is the primary (middle) board
     assert "Opponent — Aim" in text
-    # Own fleet in the top strip
     assert "Your fleet" in text
-    # Aim-phase keys
     lower = text.lower()
     assert "fire" in lower
     assert "w/a/s/d" in lower or "wasd" in lower or "move" in lower
@@ -60,17 +69,13 @@ def test_combat_wait_frame_spinner_and_quit_keys_only() -> None:
         combat_wait_frame(
             role="Guest",
             match_time="1:05",
-            placement=_fixed_placement(),
-            own_marks={},
-            tracking={},
-            revealed=frozenset(),
+            boards=_boards(),
             spinner_frame=1,
             status="Waiting for opponent…",
         )
     )
     assert "Match time 1:05" in text
     assert "Waiting" in text
-    # Spinner lives in the status band with the wait message
     assert "/" in text  # spinner_frame=1 → "/"
     lower = text.lower()
     assert "quit" in lower
