@@ -20,11 +20,12 @@ from battle_sh.networking.connection import (
 from battle_sh.networking.protocol import MatchOutcome
 from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import Coordinate, Placement
-from battle_sh.ui.boards import own_board_renderable, render_match_boards
+from battle_sh.ui.aim_flow import run_aim
+from battle_sh.ui.boards import own_board_renderable
 from battle_sh.ui.clock import Clock, FakeClock, SystemClock, format_elapsed
 from battle_sh.ui.keys import KeySource, ScriptedKeySource, TerminalKeySource
 from battle_sh.ui.placement_flow import QuitRequested, run_placement
-from battle_sh.ui.shell import lobby_frame, wait_frame
+from battle_sh.ui.shell import combat_frame, combat_wait_frame, lobby_frame, wait_frame
 from battle_sh.ui.wait_flow import wait_honoring_quit
 from rich.console import Console
 from rich.live import Live
@@ -116,7 +117,7 @@ async def run_host(
         )
         io.print("Both ready. You fire first.")
 
-        await _play_match(conn, placement, io)
+        await _play_match(conn, placement, io, role="Host", match_started_at=match_started_at)
     except QuitRequested:
         io.print("Quitting. Match Abandoned for your opponent.")
     finally:
@@ -149,7 +150,7 @@ async def run_guest(
         await _wait_for_opponent_commitment(io, conn, "Guest", match_started_at, placement)
         io.print("Both ready. Waiting for Host's first shot…")
 
-        await _play_match(conn, placement, io)
+        await _play_match(conn, placement, io, role="Guest", match_started_at=match_started_at)
     except QuitRequested:
         io.print("Quitting. Match Abandoned for your opponent.")
     finally:
@@ -237,27 +238,47 @@ async def _play_match(
     conn: MatchConnection,
     placement: Placement,
     io: LiveIO | ScriptedIO,
+    *,
+    role: str,
+    match_started_at: float,
 ) -> None:
     own_marks: dict[Coordinate, ShotResultKind] = {}
     tracking: dict[Coordinate, ShotResultKind] = {}
     revealed: set[Coordinate] = set()
     verification_ok: bool | None = None
+    last_shot: Coordinate | None = None
 
     try:
         while conn.match_end is None:
-            render_match_boards(
-                io.console, placement, own_marks, tracking, frozenset(revealed)
-            )
             if conn.my_turn:
-                report = await _take_shot_until_legal(conn, io)
+                report = await _take_shot_until_legal(
+                    conn,
+                    io,
+                    role=role,
+                    match_started_at=match_started_at,
+                    placement=placement,
+                    own_marks=own_marks,
+                    tracking=tracking,
+                    revealed=frozenset(revealed),
+                    last_shot=last_shot,
+                )
+                last_shot = parse_coordinate(report.coordinate)
                 _apply_outgoing(report, tracking, revealed)
                 if report.verification_ok is not None:
                     verification_ok = report.verification_ok
                 if report.match_end is not None:
                     break
             else:
-                io.print("Opponent's turn — waiting for their shot…")
-                report = await conn.serve_opponent_shot()
+                report = await _wait_opponent_shot(
+                    conn,
+                    io,
+                    role=role,
+                    match_started_at=match_started_at,
+                    placement=placement,
+                    own_marks=own_marks,
+                    tracking=tracking,
+                    revealed=frozenset(revealed),
+                )
                 if report.match_end is not None:
                     break
                 io.print(_format_shot_feedback(report, outgoing=False))
@@ -283,22 +304,74 @@ async def _play_match(
 
 
 async def _take_shot_until_legal(
-    conn: MatchConnection, io: LiveIO | ScriptedIO
+    conn: MatchConnection,
+    io: LiveIO | ScriptedIO,
+    *,
+    role: str,
+    match_started_at: float,
+    placement: Placement,
+    own_marks: dict[Coordinate, ShotResultKind],
+    tracking: dict[Coordinate, ShotResultKind],
+    revealed: frozenset[Coordinate],
+    last_shot: Coordinate | None,
 ) -> ShotReport:
+    fired = frozenset(tracking)
+
+    def frame(aim: Coordinate, status: str) -> object:
+        return combat_frame(
+            role=role,
+            match_time=format_elapsed(io.clock.now() - match_started_at),
+            placement=placement,
+            own_marks=own_marks,
+            tracking=tracking,
+            revealed=revealed,
+            aim=aim,
+            status=status or "Your turn — Aim and fire.",
+        )
+
     while True:
-        raw = io.ask(
-            "Your turn — shoot (e.g. B7), or q to quit> "
-        ).strip()
-        if not raw:
-            continue
-        if raw.lower() in {"q", "quit", "exit"}:
-            raise QuitRequested
+        aim = run_aim(
+            io.keys,
+            fired=fired,
+            start=last_shot,
+            clock=io.clock,
+            console=io.console,
+            frame=frame,
+        )
         try:
-            report = await conn.fire_shot(raw)
+            report = await conn.fire_shot(str(aim))
             io.print(_format_shot_feedback(report, outgoing=True))
             return report
         except (IllegalShotError, DuplicateShotError, NotYourTurnError) as exc:
             io.print(f"Try again: {exc}")
+
+
+async def _wait_opponent_shot(
+    conn: MatchConnection,
+    io: LiveIO | ScriptedIO,
+    *,
+    role: str,
+    match_started_at: float,
+    placement: Placement,
+    own_marks: dict[Coordinate, ShotResultKind],
+    tracking: dict[Coordinate, ShotResultKind],
+    revealed: frozenset[Coordinate],
+) -> ShotReport:
+    return await _live_wait(
+        io,
+        conn.serve_opponent_shot(),
+        frame=lambda status, spin: combat_wait_frame(
+            role=role,
+            match_time=format_elapsed(io.clock.now() - match_started_at),
+            placement=placement,
+            own_marks=own_marks,
+            tracking=tracking,
+            revealed=revealed,
+            spinner_frame=spin,
+            status=status or "Waiting for opponent…",
+        ),
+        initial_status="Waiting for opponent…",
+    )
 
 
 def _apply_outgoing(

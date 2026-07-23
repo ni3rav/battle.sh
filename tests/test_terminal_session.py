@@ -1,4 +1,4 @@
-"""Match-over-Relay seam via terminal session (scripted IO, not rich markup)."""
+"""Match-over-Relay seam via terminal session (scripted KeySource, not typed Coordinates)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ import pytest
 
 from battle_sh.networking.connection import MatchConnection
 from battle_sh.networking.relay import start_relay
-from battle_sh.rules.placement import Placement, coordinate
-from battle_sh.ui.play import ScriptedIO, run_guest, run_host
+from battle_sh.rules.board import parse_coordinate
+from battle_sh.rules.placement import COLUMNS, ROWS, Coordinate, Placement, coordinate
 from battle_sh.ui.keys import ScriptedKeySource
+from battle_sh.ui.play import ScriptedIO, run_guest, run_host
 
 
 def _placement_a() -> Placement:
@@ -38,6 +39,78 @@ def _placement_b() -> Placement:
     )
 
 
+def _initial_aim(start: Coordinate | None, fired: frozenset[Coordinate]) -> Coordinate:
+    preferred = start if start is not None else coordinate("A", 1)
+    if preferred not in fired:
+        return preferred
+    cells = [coordinate(col, row) for row in ROWS for col in COLUMNS]
+    start_idx = cells.index(preferred)
+    for cell in cells[start_idx + 1 :] + cells[:start_idx]:
+        if cell not in fired:
+            return cell
+    raise RuntimeError("No empty cells left")
+
+
+def _step(
+    current: Coordinate,
+    column_delta: int,
+    row_delta: int,
+    fired: frozenset[Coordinate],
+) -> Coordinate | None:
+    col_i = COLUMNS.index(current.column)
+    row = current.row
+    while True:
+        col_i += column_delta
+        row += row_delta
+        if col_i < 0 or col_i >= len(COLUMNS) or row not in ROWS:
+            return None
+        cell = coordinate(COLUMNS[col_i], row)
+        if cell not in fired:
+            return cell
+
+
+def _aim_keys_for(
+    target: Coordinate,
+    *,
+    last: Coordinate | None,
+    fired: set[Coordinate],
+) -> list[str]:
+    """WASD + f sequence that Aims at ``target`` given last Shot and fired set."""
+    frozen = frozenset(fired)
+    start = _initial_aim(last, frozen)
+    if start == target:
+        return ["f"]
+
+    queue: deque[tuple[Coordinate, list[str]]] = deque([(start, [])])
+    seen = {start}
+    moves = (("d", 1, 0), ("a", -1, 0), ("s", 0, 1), ("w", 0, -1))
+    while queue:
+        cur, path = queue.popleft()
+        for name, dc, dr in moves:
+            nxt = _step(cur, dc, dr, frozen)
+            if nxt is None or nxt in seen:
+                continue
+            new_path = [*path, name]
+            if nxt == target:
+                return [*new_path, "f"]
+            seen.add(nxt)
+            queue.append((nxt, new_path))
+    raise RuntimeError(f"Cannot Aim path from {start} to {target}")
+
+
+def _combat_key_script(targets: list[str]) -> list[str]:
+    """Placement lock then Aim/fire each target in order (updating fired/last)."""
+    keys: list[str] = ["y"]
+    fired: set[Coordinate] = set()
+    last: Coordinate | None = None
+    for raw in targets:
+        target = parse_coordinate(raw)
+        keys.extend(_aim_keys_for(target, last=last, fired=fired))
+        fired.add(target)
+        last = target
+    return keys
+
+
 async def test_host_and_guest_sessions_complete_a_winner_match() -> None:
     """Scripted Host/Guest UI sessions play through to Winner over a local Relay."""
     guest_targets = [
@@ -59,7 +132,7 @@ async def test_host_and_guest_sessions_complete_a_winner_match() -> None:
         "B4",
         "C4",
     ]
-    # Guest miss Coordinates between Host turns (must be unique — duplicates re-prompt).
+    # Guest miss Coordinates between Host turns (must be unique).
     guest_misses = [
         "E5",
         "E6",
@@ -80,12 +153,12 @@ async def test_host_and_guest_sessions_complete_a_winner_match() -> None:
     ]
     assert len(guest_misses) == len(guest_targets) - 1
     host_io = ScriptedIO(
-        inputs=deque(guest_targets),
-        keys=ScriptedKeySource(["y"]),
+        inputs=deque(),
+        keys=ScriptedKeySource(_combat_key_script(guest_targets)),
     )
     guest_io = ScriptedIO(
-        inputs=deque(guest_misses),
-        keys=ScriptedKeySource(["y"]),
+        inputs=deque(),
+        keys=ScriptedKeySource(_combat_key_script(guest_misses)),
     )
 
     async with start_relay() as relay_url:
@@ -153,22 +226,6 @@ async def test_guest_ui_reports_abandoned_when_host_disconnects() -> None:
 
 async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
     """q during wait-for-commitment closes the connection → Abandoned."""
-    from battle_sh.networking.connection import MatchConnection
-    from battle_sh.networking.relay import start_relay
-    from battle_sh.rules.placement import Placement, coordinate
-    from battle_sh.ui.play import ScriptedIO, run_host
-
-    def placement() -> Placement:
-        return Placement(
-            {
-                "Carrier": frozenset(coordinate(c, 1) for c in "ABCDE"),
-                "Battleship": frozenset(coordinate(c, 2) for c in "ABCD"),
-                "Cruiser": frozenset(coordinate(c, 3) for c in "ABC"),
-                "Submarine": frozenset(coordinate(c, 4) for c in "ABC"),
-                "Destroyer": frozenset(coordinate(c, 5) for c in "AB"),
-            }
-        )
-
     host_io = ScriptedIO(inputs=deque(), keys=ScriptedKeySource(["y", "q"]))
 
     async with start_relay(grace_seconds=0.05) as relay_url:
@@ -179,7 +236,7 @@ async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
             await run_host(
                 relay_url,
                 host_io,
-                placement_factory=placement,
+                placement_factory=_placement_a,
                 on_invite=lambda inv: invite_holder.append(inv),
                 grace_seconds=0.05,
             )
@@ -194,6 +251,50 @@ async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
             guest = await MatchConnection.connect(relay_url, grace_seconds=0.05)
             try:
                 await guest.join_match(invite_holder[0])
+                await guest.wait_for_opponent_commitment()
+                end = await guest.wait_for_match_end()
+                guest_outcome.append(str(end.outcome))
+            finally:
+                await guest.close()
+
+        await asyncio.wait_for(
+            asyncio.gather(host_task(), guest_task()),
+            timeout=15,
+        )
+
+    assert any("Quitting" in o or "Abandoned" in o for o in host_io.outputs)
+    assert guest_outcome == ["abandoned"]
+
+
+async def test_host_quit_during_aim_abandons_for_guest() -> None:
+    """q during Aim (combat) closes the connection → Abandoned."""
+    # Spacer key so wait_honoring_quit does not consume ``q`` before Aim.
+    host_io = ScriptedIO(inputs=deque(), keys=ScriptedKeySource(["y", "1", "q"]))
+
+    async with start_relay(grace_seconds=0.05) as relay_url:
+        invite_holder: list[str] = []
+        guest_outcome: list[str] = []
+
+        async def host_task() -> None:
+            await run_host(
+                relay_url,
+                host_io,
+                placement_factory=_placement_a,
+                on_invite=lambda inv: invite_holder.append(inv),
+                grace_seconds=0.05,
+            )
+
+        async def guest_task() -> None:
+            for _ in range(100):
+                if invite_holder:
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("Host never published Invite")
+            guest = await MatchConnection.connect(relay_url, grace_seconds=0.05)
+            try:
+                await guest.join_match(invite_holder[0])
+                await guest.lock_placement(_placement_b())
                 await guest.wait_for_opponent_commitment()
                 end = await guest.wait_for_match_end()
                 guest_outcome.append(str(end.outcome))

@@ -33,7 +33,7 @@ uv run python -m battle_sh.ui host --relay ws://127.0.0.1:8765
 uv run python -m battle_sh.ui guest --relay ws://127.0.0.1:8765 --invite PASTE_INVITE
 ```
 
-Placement uses immediate keys (no Enter): a random layout is ready by default. Press `1`–`5` or Tab/Shift+Tab to select a ship, `w/a/s/d` or arrows to move, `e` or `r` to flip orientation, `t` to re-roll, `y` to lock, `q` to quit. During play, enter shots as coordinates like `B7`, or `q` to quit. Caddy and TLS are not required for local play.
+Placement uses immediate keys (no Enter): a random layout is ready by default. Press `1`–`5` or Tab/Shift+Tab to select a ship, `w/a/s/d` or arrows to move, `e` or `r` to flip orientation, `t` to re-roll, `y` to lock, `q` to quit. During combat, Aim with `w/a/s/d` or arrows (skips already-fired cells), fire with `f` / Enter / Space, or `q` to quit. Caddy and TLS are not required for local play.
 
 ## Hosted Relay (`wss://` via Caddy + systemd)
 

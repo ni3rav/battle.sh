@@ -57,25 +57,30 @@ def _cell_glyph(
     marks: dict[Coordinate, ShotResultKind],
     show_ships: bool,
     selected: str | None,
+    aim: Coordinate | None = None,
 ) -> Text:
     kind = marks.get(coord)
     ship_name = ship_at.get(coord)
+    is_aim = aim is not None and coord == aim
     if kind == "miss":
         glyph = "o"
     elif kind in ("hit", "sunk"):
         glyph = "X"
     elif show_ships and ship_name is not None:
         glyph = SHIP_GLYPH.get(ship_name, "#")
+    elif is_aim:
+        glyph = "+"
     else:
         glyph = "."
-    return Text(
-        glyph,
-        style=_mark_style(
+    if is_aim:
+        style = "bold reverse yellow"
+    else:
+        style = _mark_style(
             kind,
             ship=show_ships and ship_name is not None,
             selected=selected is not None and ship_name == selected,
-        ),
-    )
+        )
+    return Text(glyph, style=style)
 
 
 def render_board(
@@ -85,6 +90,7 @@ def render_board(
     marks: dict[Coordinate, ShotResultKind],
     show_ships: bool,
     selected: str | None = None,
+    aim: Coordinate | None = None,
 ) -> Table:
     table = Table(title=title, show_header=True, box=None, pad_edge=False)
     table.add_column(" ", justify="right")
@@ -98,6 +104,7 @@ def render_board(
                 marks=marks,
                 show_ships=show_ships,
                 selected=selected,
+                aim=aim,
             )
             for col in COLUMNS
         ]
@@ -129,14 +136,18 @@ def own_board_renderable(
 def tracking_board_renderable(
     marks: dict[Coordinate, ShotResultKind],
     revealed: frozenset[Coordinate],
+    *,
+    aim: Coordinate | None = None,
 ) -> Table:
     # Revealed sunk cells are known occupied, but Ship names are not shown here.
     ship_at = {cell: "sunk" for cell in revealed}
+    title = "Opponent — Aim" if aim is not None else "Opponent — your shots"
     return render_board(
-        "Opponent — your shots",
+        title,
         ship_at=ship_at,
         marks=marks,
         show_ships=True,
+        aim=aim,
     )
 
 
