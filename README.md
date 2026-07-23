@@ -29,8 +29,8 @@ uv run python -m battle_sh.ui host --relay ws://127.0.0.1:8765
 ```
 
 ```bash
-# Terminal B — Guest (paste the Invite the Host prints)
-uv run python -m battle_sh.ui guest --relay ws://127.0.0.1:8765 --invite PASTE_INVITE
+# Terminal B — Guest (paste the Invite phrase the Host prints)
+uv run python -m battle_sh.ui guest --relay ws://127.0.0.1:8765 --invite alpha-tango-jesse-ironman
 ```
 
 ### Live Match UI

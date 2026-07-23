@@ -10,13 +10,13 @@ from battle_sh.networking.connection import MatchConnection, MatchConnectionErro
 from battle_sh.networking.relay import start_relay
 
 
-async def test_host_creates_match_and_receives_high_entropy_invite() -> None:
+async def test_host_creates_match_and_receives_phrase_invite() -> None:
     async with start_relay() as relay_url:
         host = await MatchConnection.connect(relay_url)
         try:
             invite = await host.create_match()
             assert isinstance(invite, str)
-            assert re.fullmatch(r"[A-Za-z0-9_-]{22,}", invite)
+            assert re.fullmatch(r"[a-z]+(?:-[a-z]+){3}", invite)
         finally:
             await host.close()
 
@@ -49,6 +49,19 @@ async def test_third_joiner_is_rejected_with_clear_error() -> None:
             assert exc_info.value.message
         finally:
             await third.close()
+            await guest.close()
+            await host.close()
+
+
+async def test_guest_join_normalizes_invite_case() -> None:
+    async with start_relay() as relay_url:
+        host = await MatchConnection.connect(relay_url)
+        guest = await MatchConnection.connect(relay_url)
+        try:
+            invite = await host.create_match()
+            await guest.join_match(invite.upper())
+            await host.wait_for_player_joined()
+        finally:
             await guest.close()
             await host.close()
 

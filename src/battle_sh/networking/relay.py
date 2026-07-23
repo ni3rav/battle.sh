@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import secrets
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
@@ -12,6 +11,7 @@ from typing import Any
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
+from battle_sh.networking.invite import mint_invite, normalize_invite
 from battle_sh.networking.protocol import (
     ErrorCode,
     MatchOutcome,
@@ -43,7 +43,7 @@ class _RelayState:
 
 
 def _mint_invite() -> str:
-    return secrets.token_urlsafe(16)
+    return mint_invite()
 
 
 async def _send(ws: ServerConnection, message: dict[str, Any]) -> None:
@@ -125,12 +125,13 @@ async def _handle_join(ws: ServerConnection, state: _RelayState, invite: object)
     if ws in state.seats:
         await _send(ws, error_message(ErrorCode.ALREADY_IN_MATCH, "Already in a Match"))
         return
-    if not isinstance(invite, str) or not invite:
+    if not isinstance(invite, str) or not invite.strip():
         await _send(
             ws,
             error_message(ErrorCode.MALFORMED_INVITE, "Invite must be a non-empty string"),
         )
         return
+    invite = normalize_invite(invite)
     match = state.matches.get(invite)
     if match is None or match.ended:
         await _send(ws, error_message(ErrorCode.UNKNOWN_INVITE, "Unknown Invite"))
@@ -163,12 +164,13 @@ async def _handle_reconnect(
     if ws in state.seats:
         await _send(ws, error_message(ErrorCode.ALREADY_IN_MATCH, "Already in a Match"))
         return
-    if not isinstance(invite, str) or not invite:
+    if not isinstance(invite, str) or not invite.strip():
         await _send(
             ws,
             error_message(ErrorCode.MALFORMED_INVITE, "Invite must be a non-empty string"),
         )
         return
+    invite = normalize_invite(invite)
     if role == "host":
         claimed_role: Role = "host"
     elif role == "guest":

@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--invite",
         default=None,
-        help="Invite code (Guest only; prompted if omitted)",
+        help="Invite phrase (Guest only; prompted if omitted)",
     )
     args = parser.parse_args(argv)
     io = LiveIO()
@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> None:
 
     invite = args.invite
     if not invite:
-        invite = io.ask("Paste Invite code (or q to quit)> ").strip()
+        invite = io.ask("Paste Invite phrase (or q to quit)> ").strip()
     if invite.lower() in {"q", "quit", "exit"}:
         raise SystemExit(0)
     if not invite:

@@ -95,7 +95,7 @@ async def run_host(
         invite = await conn.create_match()
         if on_invite is not None:
             on_invite(invite)
-        io.print(f"Invite code (share with your opponent): {invite}")
+        io.print(f"Invite (share with your opponent): {invite}")
 
         await _live_wait(
             io,

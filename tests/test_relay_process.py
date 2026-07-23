@@ -26,7 +26,8 @@ async def test_run_relay_accepts_match_create_on_fixed_port() -> None:
         try:
             invite = await host.create_match()
             assert isinstance(invite, str)
-            assert len(invite) >= 16
+            assert invite.count("-") == 3
+            assert invite == invite.lower()
         finally:
             await host.close()
     finally:
