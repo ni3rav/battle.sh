@@ -90,7 +90,6 @@ async def run_host(
         placement = run_placement(
             io.keys,
             console=io.console,
-            on_message=io.print,
             placement_factory=placement_factory,
         )
         await conn.lock_placement(placement)
@@ -122,7 +121,6 @@ async def run_guest(
         placement = run_placement(
             io.keys,
             console=io.console,
-            on_message=io.print,
             placement_factory=placement_factory,
         )
         await conn.lock_placement(placement)
