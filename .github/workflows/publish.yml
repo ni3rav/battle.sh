@@ -1,11 +1,12 @@
 name: Publish to PyPI
 
 on:
-  release:
-    types: [published]
   push:
+    branches: [master]
     tags:
       - "v*.*.*"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -33,3 +34,7 @@ jobs:
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Same version already on PyPI → succeed instead of 400.
+          # Bump pyproject.toml version to ship new code.
+          skip-existing: true
