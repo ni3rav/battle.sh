@@ -22,7 +22,8 @@ PLACEMENT_CONTROLS = """\
   [bold]e[/] / [bold]r[/]          flip H↔V
   [bold]t[/]              new random
   [bold]y[/]              lock
-  [bold]q[/] / [bold]Ctrl+C[/]     quit (twice)
+  [bold]Ctrl+C[/]
+  → quit
 """
 
 AIM_CONTROLS = """\
@@ -30,13 +31,15 @@ AIM_CONTROLS = """\
 
   [bold]w/a/s/d[/] / arrows move
   [bold]f[/] / Enter / Space fire
-  [bold]q[/] / [bold]Ctrl+C[/]     quit (twice)
+  [bold]Ctrl+C[/]
+  → quit
 """
 
 WAIT_CONTROLS = """\
 [bold]Waiting[/]
 
-  [bold]q[/] / [bold]Ctrl+C[/]     quit (twice)
+  [bold]Ctrl+C[/]
+  → quit
 """
 
 _SPINNER = ("|", "/", "-", "\\")

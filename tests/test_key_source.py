@@ -72,7 +72,25 @@ def test_terminal_read_maps_keyboard_interrupt_to_interrupt(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(readchar, "readkey", boom)
+
+    def stdin_ready(_timeout: float) -> bool:
+        return True
+
+    monkeypatch.setattr("battle_sh.ui.keys._stdin_ready", stdin_ready)
     assert TerminalKeySource().read() == INTERRUPT
+
+
+def test_terminal_request_interrupt_surfaces_on_try_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def stdin_not_ready(_timeout: float) -> bool:
+        return False
+
+    monkeypatch.setattr("battle_sh.ui.keys._stdin_ready", stdin_not_ready)
+    keys = TerminalKeySource()
+    keys.request_interrupt()
+    assert keys.try_read(0.0) == INTERRUPT
+    assert keys.try_read(0.0) is None
 
 
 def test_scripted_io_injects_key_source_and_clock_without_tty() -> None:

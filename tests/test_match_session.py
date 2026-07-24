@@ -85,11 +85,12 @@ def test_wait_frame_shows_spinner_match_time_and_wait_keys_only() -> None:
     assert "Guest" in text
     assert "1:05" in text
     assert "Waiting for opponent Placement" in text
-    assert "q" in text.lower()
     assert "ctrl+c" in text.lower() or "ctrl-c" in text.lower()
+    assert "→ quit" in text
     # Aim / Placement edit keys must not appear as active controls.
     assert "lock" not in text.lower()
     assert "fire" not in text.lower()
+    assert "q /" not in text.lower() and "q/" not in text.lower()
 
 
 async def test_wait_honoring_quit_completes_when_awaitable_finishes() -> None:
@@ -128,9 +129,9 @@ async def test_combat_wait_ignores_aim_keys_until_awaitable_done() -> None:
         keys.read()
 
 
-async def test_wait_honoring_quit_q_raises_quit_requested() -> None:
+async def test_wait_honoring_quit_ctrl_c_raises_quit_requested() -> None:
     clock = FakeClock()
-    keys = ScriptedKeySource(["q", "q"])
+    keys = ScriptedKeySource(["ctrl+c", "ctrl+c"])
     messages: list[str] = []
 
     async def never() -> None:
@@ -143,12 +144,12 @@ async def test_wait_honoring_quit_q_raises_quit_requested() -> None:
             clock=clock,
             on_message=messages.append,
         )
-    assert any("again" in m.lower() for m in messages)
+    assert messages == ["Press Ctrl+C again to quit."]
 
 
-async def test_wait_honoring_quit_single_q_only_warns() -> None:
+async def test_wait_honoring_quit_single_ctrl_c_only_warns() -> None:
     clock = FakeClock()
-    keys = ScriptedKeySource(["q"], poll_all=True)
+    keys = ScriptedKeySource(["ctrl+c"], poll_all=True)
     messages: list[str] = []
 
     async def done_soon() -> str:
@@ -162,16 +163,16 @@ async def test_wait_honoring_quit_single_q_only_warns() -> None:
         on_message=messages.append,
     )
     assert result == "ok"
-    assert any("again" in m.lower() for m in messages)
+    assert messages == ["Press Ctrl+C again to quit."]
 
 
 def test_scripted_try_read_leaves_placement_keys_for_read() -> None:
     from battle_sh.ui.keys import Key
 
-    keys = ScriptedKeySource(["y", "q"])
+    keys = ScriptedKeySource(["y", "ctrl+c"])
     assert keys.try_read() is None
     assert keys.read() == Key("y")
-    assert keys.try_read() == Key("q")
+    assert keys.try_read() == Key("ctrl+c")
 
 
 async def test_wait_honoring_ctrl_c_arm_then_confirm() -> None:
@@ -198,25 +199,26 @@ async def test_wait_honoring_ctrl_c_arm_then_confirm() -> None:
             on_message=messages.append,
             on_tick=on_tick,
         )
-    assert any("again" in m.lower() for m in messages)
+    assert messages == ["Press Ctrl+C again to quit."]
 
 
-async def test_wait_honoring_q_then_ctrl_c_confirms() -> None:
+async def test_wait_honoring_quit_ignores_q() -> None:
     clock = FakeClock(start=0.0)
-    keys = ScriptedKeySource(["q", "ctrl+c"])
+    keys = ScriptedKeySource(["q", "q"], poll_all=True)
     messages: list[str] = []
 
-    async def never() -> None:
-        await asyncio.sleep(60)
+    async def done_soon() -> str:
+        await asyncio.sleep(0.15)
+        return "ok"
 
-    with pytest.raises(QuitRequested):
-        await wait_honoring_quit(
-            never(),
-            keys=keys,
-            clock=clock,
-            on_message=messages.append,
-        )
-    assert any("again" in m.lower() for m in messages)
+    result = await wait_honoring_quit(
+        done_soon(),
+        keys=keys,
+        clock=clock,
+        on_message=messages.append,
+    )
+    assert result == "ok"
+    assert messages == []
 
 
 async def test_placement_top_info_includes_match_time_from_clock() -> None:

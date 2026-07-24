@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import signal
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass, field
 from typing import TypeVar
 
@@ -55,6 +56,33 @@ async def _leave_on_quit(conn: MatchConnection) -> None:
     """Tell the Relay this was intentional so the opponent skips reconnect grace."""
     with contextlib.suppress(ConnectionClosed, OSError, MatchConnectionError):
         await conn.leave_match()
+
+
+@contextlib.contextmanager
+def _sigint_as_key_interrupt(keys: KeySource) -> Generator[None]:
+    """Route SIGINT into ``TerminalKeySource.request_interrupt`` (two-step quit).
+
+    Without this, asyncio cancels the Match task on Ctrl+C and ``leave_match``
+    never runs — the opponent only sees a disconnect grace window.
+    """
+    if not isinstance(keys, TerminalKeySource):
+        yield
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        yield
+        return
+    try:
+        loop.add_signal_handler(signal.SIGINT, keys.request_interrupt)
+    except (NotImplementedError, RuntimeError, ValueError):
+        yield
+        return
+    try:
+        yield
+    finally:
+        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+            loop.remove_signal_handler(signal.SIGINT)
 
 
 def _your_fleet_status(
@@ -184,48 +212,56 @@ async def run_host(
         return
     match_started_at: float | None = None
     try:
-        invite = await conn.create_match()
-        if on_invite is not None:
-            on_invite(invite)
-        io.print(f"Invite (share with your opponent): {invite}")
+        with _sigint_as_key_interrupt(io.keys):
+            invite = await conn.create_match()
+            if on_invite is not None:
+                on_invite(invite)
+            io.print(f"Invite (share with your opponent): {invite}")
 
-        await _live_wait(
-            io,
-            conn.wait_for_player_joined(),
-            frame=lambda status, spin: lobby_frame(
-                role="Host",
-                invite=invite,
-                status=status or "Waiting for Guest…",
-                status_info=_phase_status(
-                    conn, "Host", "Lobby", opponent_present=False
+            await _live_wait(
+                io,
+                conn.wait_for_player_joined(),
+                frame=lambda status, spin: lobby_frame(
+                    role="Host",
+                    invite=invite,
+                    status=status or "Waiting for Guest…",
+                    status_info=_phase_status(
+                        conn, "Host", "Lobby", opponent_present=False
+                    ),
                 ),
-            ),
-            initial_status="Waiting for Guest…",
-            conn=conn,
-        )
-        match_started_at = io.clock.now()
-        io.print("Guest joined.")
+                initial_status="Waiting for Guest…",
+                conn=conn,
+            )
+            match_started_at = io.clock.now()
+            io.print("Guest joined.")
 
-        placement = await _run_placement_with_match_time(
-            io,
-            role="Host",
-            match_started_at=match_started_at,
-            placement_factory=placement_factory,
-        )
-        await conn.lock_placement(placement)
+            placement = await _run_placement_with_match_time(
+                io,
+                role="Host",
+                match_started_at=match_started_at,
+                placement_factory=placement_factory,
+            )
+            await conn.lock_placement(placement)
 
-        await _wait_for_opponent_commitment(
-            io, conn, "Host", match_started_at, placement
-        )
-        io.print("Both ready. You fire first.")
+            await _wait_for_opponent_commitment(
+                io, conn, "Host", match_started_at, placement
+            )
+            io.print("Both ready. You fire first.")
 
-        await _play_match(conn, placement, io, role="Host", match_started_at=match_started_at)
+            await _play_match(
+                conn, placement, io, role="Host", match_started_at=match_started_at
+            )
     except QuitRequested:
         await _leave_on_quit(conn)
         io.print("Quitting. Match Abandoned for your opponent.")
     except KeyboardInterrupt:
         await _leave_on_quit(conn)
         io.print("Quitting. Match Abandoned for your opponent.")
+    except asyncio.CancelledError:
+        # Platforms without add_signal_handler (or a stray cancel) still must
+        # leave so the opponent skips reconnect grace.
+        await _leave_on_quit(conn)
+        raise
     except ConnectionClosed as exc:
         io.print(_connection_lost_message(exc))
     except MatchConnectionError as exc:
@@ -252,28 +288,36 @@ async def run_guest(
         return
     match_started_at: float | None = None
     try:
-        await conn.join_match(invite)
-        match_started_at = io.clock.now()
-        io.print(f"Joined Match with Invite {invite}.")
+        with _sigint_as_key_interrupt(io.keys):
+            await conn.join_match(invite)
+            match_started_at = io.clock.now()
+            io.print(f"Joined Match with Invite {invite}.")
 
-        placement = await _run_placement_with_match_time(
-            io,
-            role="Guest",
-            match_started_at=match_started_at,
-            placement_factory=placement_factory,
-        )
-        await conn.lock_placement(placement)
+            placement = await _run_placement_with_match_time(
+                io,
+                role="Guest",
+                match_started_at=match_started_at,
+                placement_factory=placement_factory,
+            )
+            await conn.lock_placement(placement)
 
-        await _wait_for_opponent_commitment(io, conn, "Guest", match_started_at, placement)
-        io.print("Both ready. Waiting for Host's first shot…")
+            await _wait_for_opponent_commitment(
+                io, conn, "Guest", match_started_at, placement
+            )
+            io.print("Both ready. Waiting for Host's first shot…")
 
-        await _play_match(conn, placement, io, role="Guest", match_started_at=match_started_at)
+            await _play_match(
+                conn, placement, io, role="Guest", match_started_at=match_started_at
+            )
     except QuitRequested:
         await _leave_on_quit(conn)
         io.print("Quitting. Match Abandoned for your opponent.")
     except KeyboardInterrupt:
         await _leave_on_quit(conn)
         io.print("Quitting. Match Abandoned for your opponent.")
+    except asyncio.CancelledError:
+        await _leave_on_quit(conn)
+        raise
     except ConnectionClosed as exc:
         io.print(_connection_lost_message(exc))
     except MatchConnectionError as exc:

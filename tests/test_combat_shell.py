@@ -61,7 +61,9 @@ def test_combat_frame_opponent_wide_own_compact_aim_controls() -> None:
     lower = text.lower()
     assert "fire" in lower
     assert "w/a/s/d" in lower or "wasd" in lower or "move" in lower
-    assert "quit" in lower
+    assert "ctrl+c" in lower
+    assert "→ quit" in text
+    assert "q /" not in lower and "q/" not in lower
     assert "lock" not in lower
 
 
@@ -79,6 +81,8 @@ def test_combat_wait_frame_spinner_and_quit_keys_only() -> None:
     assert "Waiting" in text
     assert "/" in text  # spinner_frame=1 → "/"
     lower = text.lower()
-    assert "quit" in lower
+    assert "ctrl+c" in lower
+    assert "→ quit" in text
     assert "fire" not in lower
     assert "lock" not in lower
+    assert "q /" not in lower and "q/" not in lower

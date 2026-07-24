@@ -86,9 +86,9 @@ Fixed **three-band** layout: top = Match/role/turn + Match time; middle = wide b
 | --- | --- |
 | Placement | `1`–`5` or Tab / Shift+Tab select ship; `w/a/s/d` or arrows move; `e` / `r` flip H↔V; `t` re-roll; `y` lock |
 | Combat | `w/a/s/d` or arrows Aim (skips fired cells); `f` / Enter / Space fire |
-| Any Live phase | `q` quit (Abandon); first Ctrl+C warns, second within ~3s Abandons (arm auto-clears) |
+| Any Live phase | first Ctrl+C warns (status), second confirms Abandon and sends `leave_match` (opponent skips reconnect grace; arm auto-clears) |
 
-Waiting turns show a spinner; only `q` and Ctrl+C are honored. Invite for Guest stays CLI `--invite` (or a one-shot paste before Live UI). Caddy and TLS are not required for local play.
+Waiting turns show a spinner; only Ctrl+C is honored for quit. Invite for Guest stays CLI `--invite` (or a one-shot paste before Live UI). Caddy and TLS are not required for local play.
 
 ### Manual Host/Guest smoke checklist
 
@@ -98,7 +98,7 @@ On a local Relay (commands above), in two terminals:
 2. Guest joins with `--invite`; both see Match time start; three-band chrome stays stable.
 3. Placement: move/rotate/re-roll with keys, then `y` to lock; opponent wait shows spinner.
 4. Combat: Aim with arrows/WASD, fire with `f`; confirm skip over already-fired cells.
-5. Quit path: `q` or two-step Ctrl+C Abandons; opponent sees Abandoned; end screen shows frozen Match time.
+5. Quit path: two-step Ctrl+C Abandons immediately for the opponent (`leave_match`); end screen shows frozen Match time.
 6. Optional: play through to Winner and confirm frozen Match time on the end screen.
 
 ## Run a Relay on any cloud VM (`wss://`)

@@ -30,7 +30,7 @@ _PlacementAction = Literal["continue", "lock", "quit"]
 
 
 class QuitRequested(Exception):
-    """Player asked to leave the Match (q)."""
+    """Player asked to leave the Match (Ctrl+C)."""
 
 
 def _apply_placement_key(
@@ -47,7 +47,7 @@ def _apply_placement_key(
     an optional status ``message`` to emit.
     """
     token = key_token(key)
-    if token == "q" or key.is_interrupt:
+    if key.is_interrupt:
         if arm is None or arm.handle_interrupt() == "confirm":
             return placement, selected, "quit", None
         return placement, selected, "continue", QUIT_WARN

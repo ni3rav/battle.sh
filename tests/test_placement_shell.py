@@ -44,8 +44,11 @@ def test_placement_frame_has_three_bands_with_board_and_controls() -> None:
     assert "y" in text.lower() and "lock" in text.lower()
     assert "t" in text.lower() and "random" in text.lower()
     assert "w/a/s/d" in text.lower() or "wasd" in text.lower()
+    assert "ctrl+c" in text.lower()
+    assert "→ quit" in text
     assert "fire" not in text.lower()
     assert "shoot" not in text.lower()
+    assert "q /" not in text.lower() and "q/" not in text.lower()
 
 
 def test_run_placement_with_console_keeps_keysource_behavior() -> None:

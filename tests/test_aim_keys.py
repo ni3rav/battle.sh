@@ -61,14 +61,34 @@ def test_aim_resumes_from_last_shot() -> None:
     ) == coordinate("D", 5)
 
 
-def test_q_raises_quit_requested() -> None:
+def test_ctrl_c_raises_quit_requested() -> None:
     with pytest.raises(QuitRequested):
-        run_aim(ScriptedKeySource(["q"]), fired=frozenset())
+        run_aim(ScriptedKeySource(["ctrl+c"]), fired=frozenset())
 
 
-def test_q_with_clock_requires_confirm() -> None:
+def test_q_is_ignored_as_quit_key() -> None:
+    assert run_aim(ScriptedKeySource(["q", "f"]), fired=frozenset()) == coordinate(
+        "A", 1
+    )
+
+
+def test_ctrl_c_with_clock_requires_confirm() -> None:
     from battle_sh.ui.clock import FakeClock
 
     clock = FakeClock()
     with pytest.raises(QuitRequested):
-        run_aim(ScriptedKeySource(["q", "q"]), fired=frozenset(), clock=clock)
+        run_aim(
+            ScriptedKeySource(["ctrl+c", "ctrl+c"]), fired=frozenset(), clock=clock
+        )
+
+
+def test_single_ctrl_c_with_clock_does_not_quit() -> None:
+    from battle_sh.ui.clock import FakeClock
+
+    clock = FakeClock()
+    assert (
+        run_aim(
+            ScriptedKeySource(["ctrl+c", "f"]), fired=frozenset(), clock=clock
+        )
+        == coordinate("A", 1)
+    )

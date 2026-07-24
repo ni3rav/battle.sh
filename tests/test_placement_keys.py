@@ -28,19 +28,25 @@ def test_y_locks_and_returns_legal_placement() -> None:
     assert placement == _fixed_placement()
 
 
-def test_q_raises_quit_requested() -> None:
-    # Without a Clock there is no QuitArm — q quits immediately (scripted tests).
-    keys = ScriptedKeySource(["q"])
+def test_ctrl_c_raises_quit_requested() -> None:
+    # Without a Clock there is no QuitArm — Ctrl+C quits immediately (scripted tests).
+    keys = ScriptedKeySource(["ctrl+c"])
     with pytest.raises(QuitRequested):
         run_placement(keys, placement_factory=_fixed_placement)
 
 
-def test_q_with_clock_requires_confirm() -> None:
+def test_q_is_ignored_as_quit_key() -> None:
+    keys = ScriptedKeySource(["q", "y"])
+    placement = run_placement(keys, placement_factory=_fixed_placement)
+    assert placement == _fixed_placement()
+
+
+def test_ctrl_c_with_clock_requires_confirm() -> None:
     from battle_sh.ui.clock import FakeClock
 
     clock = FakeClock()
     messages: list[str] = []
-    keys = ScriptedKeySource(["q", "q"])
+    keys = ScriptedKeySource(["ctrl+c", "ctrl+c"])
     with pytest.raises(QuitRequested):
         run_placement(
             keys,
@@ -48,7 +54,7 @@ def test_q_with_clock_requires_confirm() -> None:
             clock=clock,
             on_message=messages.append,
         )
-    assert any("again" in m.lower() for m in messages)
+    assert messages == ["Press Ctrl+C again to quit."]
 
 
 def test_select_and_move_with_wasd() -> None:

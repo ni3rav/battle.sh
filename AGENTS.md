@@ -26,13 +26,13 @@ then `uv run python -m battle_sh.ui host|guest --relay ws://127.0.0.1:8765`. The
 a random Invite phrase the Guest passes via `--invite`.
 
 Non-obvious gotchas:
-- The UI is a full-screen `rich` TUI that reads keys with a **blocking** `readchar` during
-  the Placement and Aim phases. That blocks the asyncio loop, so if you idle at those prompts
-  longer than the WebSocket keepalive (~20s) the Relay connection drops with `1011 keepalive
-  ping timeout`. When testing manually, act promptly at Placement/Aim. The Lobby and
+- Placement and Aim read keys off the event loop (worker thread / polling) so the
+  WebSocket keepalive stays responsive while waiting for input. Lobby and
   "waiting for opponent" screens are async and stay alive indefinitely.
-- `--grace-seconds` controls the reconnect grace window, not the keepalive; it does not
-  prevent the idle timeout above.
+- Quit is two-step Ctrl+C only (not `q`). SIGINT is routed into the same QuitArm
+  path so a confirmed quit sends `leave_match` and the opponent Abandons
+  immediately instead of waiting on reconnect grace.
+- `--grace-seconds` controls the reconnect grace window, not the keepalive.
 - Manual/automated UI testing needs a PTY. Drive it with `tmux send-keys` (e.g. `y` locks a
   random placement, `f` fires at the current aim). The layout reflows to the terminal width.
 - The `scripts/provision-relay` / `deprovision-relay` / `practice-vm` flows are for deploying

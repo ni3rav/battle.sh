@@ -29,7 +29,7 @@ def _apply_aim_key(
 ) -> tuple[Coordinate, str, _AimAction]:
     """Pure per-key Aim transition shared by the sync and async drivers."""
     token = key_token(key)
-    if token == "q" or key.is_interrupt:
+    if key.is_interrupt:
         if arm is None or arm.handle_interrupt() == "confirm":
             return aim, status, "quit"
         return aim, QUIT_WARN, "continue"

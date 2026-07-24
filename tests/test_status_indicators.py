@@ -105,7 +105,8 @@ def test_combat_frame_status_shows_indicators_and_keeps_controls() -> None:
     # Compact scoreboard + controls visible at typical terminal size.
     assert "Ships" in text
     assert "fire" in text.lower()
-    assert "quit" in text.lower()
+    assert "ctrl+c" in text.lower()
+    assert "→ quit" in text
     assert "lock" not in text.lower()
 
 
@@ -128,7 +129,8 @@ def test_combat_wait_frame_status_marks_opponent_turn() -> None:
     assert "Turn: Opponent" in text
     assert "Waiting" in text
     assert "Ships" in text
-    assert "quit" in text.lower()
+    assert "ctrl+c" in text.lower()
+    assert "→ quit" in text
     assert "fire" not in text.lower()
     assert "lock" not in text.lower()
 

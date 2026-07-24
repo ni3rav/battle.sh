@@ -74,7 +74,7 @@ class ScriptedKeySource:
     def try_read(self, timeout: float = 0.0) -> Key | None:
         """Non-blocking poll for wait loops.
 
-        By default, scripted sources only surface ``q`` / Ctrl+C here so
+        By default, scripted sources only surface Ctrl+C here so
         Placement/Aim keys remain available for ``read()``. Pass
         ``poll_all=True`` to surface every key (Terminal-like) for tests that
         assert wait loops ignore non-quit input.
@@ -83,11 +83,7 @@ class ScriptedKeySource:
         if not self._keys:
             return None
         front = self._keys[0]
-        if (
-            self._poll_all
-            or front.name.lower() == "q"
-            or front.is_interrupt
-        ):
+        if self._poll_all or front.is_interrupt:
             return self._keys.popleft()
         return None
 
@@ -137,9 +133,37 @@ def _stdin_ready(timeout: float) -> bool:
 
 
 class TerminalKeySource:
-    """Production KeySource: reads raw terminal keys via readchar."""
+    """Production KeySource: reads raw terminal keys via readchar.
+
+    ``request_interrupt`` lets the Match SIGINT handler inject Ctrl+C into the
+    same QuitArm path used for typed ``\\x03``, without cancelling the asyncio
+    task (which would skip ``leave_match``).
+    """
+
+    def __init__(self) -> None:
+        self._interrupt_requested = False
+
+    def request_interrupt(self) -> None:
+        """Queue a Ctrl+C for the next ``read`` / ``try_read`` (SIGINT path)."""
+        self._interrupt_requested = True
 
     def read(self) -> Key:
+        while True:
+            if self._interrupt_requested:
+                self._interrupt_requested = False
+                return INTERRUPT
+            if _stdin_ready(0.05):
+                return self._read_ready_key()
+
+    def try_read(self, timeout: float = 0.0) -> Key | None:
+        if self._interrupt_requested:
+            self._interrupt_requested = False
+            return INTERRUPT
+        if not _stdin_ready(timeout):
+            return None
+        return self._read_ready_key()
+
+    def _read_ready_key(self) -> Key:
         try:
             raw = readchar.readkey()
         except KeyboardInterrupt:
@@ -151,8 +175,3 @@ class TerminalKeySource:
         if len(raw) == 1 and raw.isprintable():
             return Key(raw.lower())
         return Key(raw)
-
-    def try_read(self, timeout: float = 0.0) -> Key | None:
-        if not _stdin_ready(timeout):
-            return None
-        return self.read()

@@ -15,7 +15,10 @@ def test_readme_documents_key_map_layout_match_time_and_ctrl_c() -> None:
     assert "`y`" in text or "press `y`" in text or "y` to lock" in text
     assert "fire" in text
     assert "ctrl+c" in text
+    assert "leave_match" in text
     assert "three-band" in text or "three band" in text
     assert "match time" in text
     assert "smoke" in text
     assert "host" in text and "guest" in text
+    assert "q quit" not in text
+    assert "`q`" not in text

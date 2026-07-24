@@ -1,4 +1,4 @@
-"""Wait loops that honor only q / two-step Ctrl+C while an awaitable runs."""
+"""Wait loops that honor only two-step Ctrl+C while an awaitable runs."""
 
 from __future__ import annotations
 
@@ -23,10 +23,10 @@ async def wait_honoring_quit(
     on_tick: Callable[[], None] | None = None,
     poll_timeout: float = 0.05,
 ) -> T:
-    """Await ``awaitable`` while accepting only ``q`` / Ctrl+C to Abandon.
+    """Await ``awaitable`` while accepting only Ctrl+C to Abandon.
 
-    Both quit keys share a two-step confirm (``QuitArm``): first warns, second
-    within the arm window raises ``QuitRequested``.
+    Ctrl+C uses a two-step confirm (``QuitArm``): first warns, second within
+    the arm window raises ``QuitRequested``.
     """
     arm = QuitArm(clock)
     task = asyncio.ensure_future(awaitable)
@@ -37,8 +37,7 @@ async def wait_honoring_quit(
             arm.expire_if_due()
             key = keys.try_read(poll_timeout)
             if key is not None:
-                token = key.name.lower()
-                if token == "q" or key.is_interrupt:
+                if key.is_interrupt:
                     if arm.handle_interrupt() == "confirm":
                         raise QuitRequested
                     if on_message is not None:
