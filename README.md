@@ -2,6 +2,49 @@
 
 Terminal two-player Battleship over an operator-owned WebSocket Relay.
 
+## Install
+
+```bash
+pip install battle-sh
+```
+
+This installs a single `battle-sh` command. You do not need to clone the repo,
+run `uv`, or invoke Python modules to play.
+
+## Play (`battle-sh`)
+
+The whole experience is one executable with exactly three modes:
+
+```bash
+battle-sh relay     # run the Match Relay server
+battle-sh host      # start a new game and print an Invite
+battle-sh join      # join a game with an Invite (as the Guest)
+```
+
+Point clients at a relay with `--relay` (or the `BATTLE_SH_RELAY` environment
+variable); it defaults to `ws://127.0.0.1:8765`.
+
+```bash
+# Terminal A — Relay
+battle-sh relay --bind-host 127.0.0.1 --port 8765
+```
+
+```bash
+# Terminal B — Host (prints an Invite phrase to share)
+battle-sh host --relay ws://127.0.0.1:8765
+```
+
+```bash
+# Terminal C — Guest (paste the Invite the Host printed)
+battle-sh join --relay ws://127.0.0.1:8765 --invite alpha-tango-jesse-ironman
+```
+
+Against a hosted relay, use the `wss://` URL, e.g.
+`battle-sh host --relay wss://relay.example.com`.
+
+The Match UI shows a live scoreboard: active/remaining ships per side, hits,
+current turn, match state, and a connection indicator for both players.
+
 ## Local development (`ws://`, no Caddy)
 
 ### Checks

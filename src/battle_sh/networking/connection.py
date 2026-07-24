@@ -138,6 +138,11 @@ class MatchConnection:
     def match_end(self) -> MatchEnd | None:
         return self._match_end
 
+    @property
+    def is_connected(self) -> bool:
+        """True while the underlying WebSocket to the Relay is open."""
+        return self._ws.state.name == "OPEN"
+
     def _arm_turns_if_ready(self) -> None:
         if self.ready_to_fire and self._role is not None:
             self._my_turn = self._role == "host"
