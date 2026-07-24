@@ -430,6 +430,10 @@ async def _handle_client(ws: ServerConnection, state: _RelayState) -> None:
                     role=role,
                     msg_type=str(msg_type),
                 )
+    except ConnectionClosed:
+        # The client vanished mid-exchange (e.g. while we were replying). Treat
+        # it as a normal disconnect and clean up rather than crashing the handler.
+        log.debug("client_closed_during_exchange")
     finally:
         health.cancel()
         with contextlib.suppress(asyncio.CancelledError):

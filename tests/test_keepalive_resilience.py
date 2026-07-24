@@ -19,6 +19,7 @@ import pytest
 from battle_sh.networking import connection as connection_mod
 from battle_sh.networking import relay as relay_mod
 from battle_sh.networking.connection import MatchConnection
+from battle_sh.networking.protocol import MsgType
 from battle_sh.networking.relay import start_relay
 from battle_sh.rules.placement import Placement, coordinate
 from battle_sh.ui.aim_flow import run_aim_async
@@ -223,3 +224,24 @@ async def test_slow_turn_does_not_trigger_keepalive_timeout(
         finally:
             await guest.close()
             await host.close()
+
+
+async def test_relay_survives_client_vanishing_mid_exchange() -> None:
+    """A client that closes while the Relay is replying must not crash serving."""
+    async with start_relay() as relay_url:
+        gone = await MatchConnection.connect(relay_url)
+        await gone.create_match()
+        # Send a message that makes the Relay reply, then close before it can.
+        await gone._send(  # pyright: ignore[reportPrivateUsage]
+            {"type": MsgType.SHOT, "coordinate": "A1"}
+        )
+        await gone.close()
+        await asyncio.sleep(0.1)
+
+        # The Relay must remain healthy for new Matches.
+        survivor = await MatchConnection.connect(relay_url)
+        try:
+            invite = await survivor.create_match()
+            assert invite
+        finally:
+            await survivor.close()
