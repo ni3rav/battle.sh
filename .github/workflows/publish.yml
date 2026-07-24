@@ -1,0 +1,35 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pypi-publish:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/battle-sh
+    permissions:
+      id-token: write # Required for PyPI Trusted Publishing (OIDC)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build package distribution
+        run: uv build
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
