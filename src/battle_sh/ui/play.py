@@ -20,7 +20,11 @@ from battle_sh.networking.connection import (
 )
 from battle_sh.networking.protocol import MatchOutcome
 from battle_sh.rules.board import ShotResultKind, parse_coordinate
-from battle_sh.rules.placement import Coordinate, Placement
+from battle_sh.rules.placement import (
+    STANDARD_FLEET_LENGTHS,
+    Coordinate,
+    Placement,
+)
 from battle_sh.ui.aim_flow import run_aim_async
 from battle_sh.ui.boards import own_board_renderable
 from battle_sh.ui.clock import Clock, FakeClock, SystemClock, format_elapsed
@@ -28,6 +32,7 @@ from battle_sh.ui.keys import KeySource, ScriptedKeySource, TerminalKeySource
 from battle_sh.ui.placement_flow import QuitRequested, run_placement_async
 from battle_sh.ui.shell import (
     CombatBoards,
+    MatchStatus,
     combat_frame,
     combat_wait_frame,
     lobby_frame,
@@ -39,6 +44,50 @@ from rich.live import Live
 from websockets.exceptions import ConnectionClosed
 
 T = TypeVar("T")
+
+_FLEET_SIZE = len(STANDARD_FLEET_LENGTHS)
+_TOTAL_CELLS = sum(STANDARD_FLEET_LENGTHS.values())
+
+
+def _your_fleet_status(
+    placement: Placement, own_marks: dict[Coordinate, ShotResultKind]
+) -> tuple[int, tuple[tuple[str, bool], ...]]:
+    """Per-ship afloat/sunk state for our own fleet from incoming hit marks."""
+    afloat = 0
+    fleet: list[tuple[str, bool]] = []
+    for name in STANDARD_FLEET_LENGTHS:
+        cells = placement.ships[name]
+        hits = sum(1 for c in cells if own_marks.get(c) in ("hit", "sunk"))
+        is_afloat = hits < len(cells)
+        afloat += 1 if is_afloat else 0
+        fleet.append((name, is_afloat))
+    return afloat, tuple(fleet)
+
+
+def _count_hits(marks: dict[Coordinate, ShotResultKind]) -> int:
+    return sum(1 for kind in marks.values() if kind in ("hit", "sunk"))
+
+
+def _phase_status(
+    conn: MatchConnection, role: str, state: str, *, opponent_present: bool
+) -> MatchStatus:
+    """Lightweight status (connection/state) for lobby and wait phases."""
+    connected = conn.is_connected
+    return MatchStatus(
+        role=role,
+        state=state,
+        turn="—",
+        your_ships_afloat=_FLEET_SIZE,
+        your_ships_total=_FLEET_SIZE,
+        enemy_ships_afloat=_FLEET_SIZE,
+        enemy_ships_total=_FLEET_SIZE,
+        your_hits=0,
+        enemy_hits=0,
+        total_cells=_TOTAL_CELLS,
+        you_connected=connected,
+        opponent_connected=connected and opponent_present,
+        synchronized=conn.ready_to_fire,
+    )
 
 
 def _connection_lost_message(exc: ConnectionClosed) -> str:
@@ -118,6 +167,9 @@ async def run_host(
                 role="Host",
                 invite=invite,
                 status=status or "Waiting for Guest…",
+                status_info=_phase_status(
+                    conn, "Host", "Lobby", opponent_present=False
+                ),
             ),
             initial_status="Waiting for Guest…",
         )
@@ -206,6 +258,9 @@ async def _wait_for_opponent_commitment(
             spinner_frame=spin,
             status=status or "Waiting for opponent to lock…",
             board=own_board_renderable(placement, {}),
+            status_info=_phase_status(
+                conn, role, "Placement — waiting for opponent", opponent_present=True
+            ),
         ),
         initial_status="Waiting for opponent to lock…",
     )
@@ -279,6 +334,7 @@ async def _play_match(
     own_marks: dict[Coordinate, ShotResultKind] = {}
     tracking: dict[Coordinate, ShotResultKind] = {}
     revealed: set[Coordinate] = set()
+    enemy_sunk_ships: list[str] = []
     verification_ok: bool | None = None
     last_shot: Coordinate | None = None
     frozen_match_time: str | None = None
@@ -289,6 +345,28 @@ async def _play_match(
             own_marks=own_marks,
             tracking=tracking,
             revealed=frozenset(revealed),
+        )
+
+    def match_status() -> MatchStatus:
+        your_afloat, your_fleet = _your_fleet_status(placement, own_marks)
+        over = conn.match_end is not None
+        connected = conn.is_connected
+        return MatchStatus(
+            role=role,
+            state="Match over" if over else "Combat",
+            turn="You" if conn.my_turn else "Opponent",
+            your_ships_afloat=your_afloat,
+            your_ships_total=_FLEET_SIZE,
+            enemy_ships_afloat=_FLEET_SIZE - len(enemy_sunk_ships),
+            enemy_ships_total=_FLEET_SIZE,
+            your_hits=_count_hits(tracking),
+            enemy_hits=_count_hits(own_marks),
+            total_cells=_TOTAL_CELLS,
+            you_connected=connected,
+            opponent_connected=connected and not over,
+            synchronized=conn.ready_to_fire,
+            your_fleet=your_fleet,
+            enemy_sunk=tuple(enemy_sunk_ships),
         )
 
     def elapsed() -> str:
@@ -310,9 +388,12 @@ async def _play_match(
                     boards=boards(),
                     elapsed=elapsed,
                     last_shot=last_shot,
+                    status_info=match_status(),
                 )
                 last_shot = parse_coordinate(report.coordinate)
                 _apply_outgoing(report, tracking, revealed)
+                if report.result == "sunk" and report.ship:
+                    enemy_sunk_ships.append(report.ship)
                 if report.verification_ok is not None:
                     verification_ok = report.verification_ok
                 if report.match_end is not None:
@@ -328,6 +409,7 @@ async def _play_match(
                         boards=boards(),
                         spinner_frame=spin,
                         status=status or "Waiting for opponent…",
+                        status_info=match_status(),
                     ),
                     initial_status="Waiting for opponent…",
                 )
@@ -373,6 +455,7 @@ async def _take_shot_until_legal(
     boards: CombatBoards,
     elapsed: Callable[[], str],
     last_shot: Coordinate | None,
+    status_info: MatchStatus | None = None,
 ) -> ShotReport:
     fired = frozenset(boards.tracking)
 
@@ -383,6 +466,7 @@ async def _take_shot_until_legal(
             boards=boards,
             aim=aim,
             status=status or "Your turn — Aim and fire.",
+            status_info=status_info,
         )
 
     while True:
