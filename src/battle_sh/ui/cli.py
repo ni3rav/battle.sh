@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+from battle_sh.networking.protocol import DEFAULT_GRACE_SECONDS
 from battle_sh.observability import configure_client_logging
 from battle_sh.ui.play import LiveIO, run_guest, run_host
 
@@ -26,7 +27,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--grace-seconds",
         type=float,
-        default=30.0,
+        default=DEFAULT_GRACE_SECONDS,
         help="Reconnect grace window in seconds",
     )
     parser.add_argument(

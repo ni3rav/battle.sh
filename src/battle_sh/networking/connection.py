@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Self, cast
 
@@ -11,6 +13,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
 from battle_sh.networking.protocol import (
+    DEFAULT_GRACE_SECONDS,
     KEEPALIVE_PING_INTERVAL,
     KEEPALIVE_PING_TIMEOUT,
     ErrorCode,
@@ -68,6 +71,7 @@ class NotYourTurnError(Exception):
 class MatchEnd:
     outcome: MatchOutcome
     winner: Role | None = None
+    reason: str | None = None
 
 
 @dataclass
@@ -83,7 +87,7 @@ class ShotReport:
 @dataclass
 class MatchConnection:
     _ws: ClientConnection
-    _grace_seconds: float = 30.0
+    _grace_seconds: float = DEFAULT_GRACE_SECONDS
     _own_commitment: str | None = None
     _opponent_commitment: str | None = None
     _invite: str | None = None
@@ -94,9 +98,17 @@ class MatchConnection:
     _opponent_answers: list[ShotAnswer] = field(default_factory=list[ShotAnswer])
     _match_end: MatchEnd | None = None
     _conn_id: str = field(default_factory=new_conn_id)
+    _opponent_connected: bool = True
+    _opponent_grace_seconds: float | None = None
+    _status_listener: Callable[[str], None] | None = None
+    _inbox: deque[dict[str, Any]] = field(
+        default_factory=lambda: deque[dict[str, Any]]()
+    )
 
     @classmethod
-    async def connect(cls, relay_url: str, *, grace_seconds: float = 30.0) -> Self:
+    async def connect(
+        cls, relay_url: str, *, grace_seconds: float = DEFAULT_GRACE_SECONDS
+    ) -> Self:
         ws = await connect(
             relay_url,
             ping_interval=KEEPALIVE_PING_INTERVAL,
@@ -143,6 +155,21 @@ class MatchConnection:
         """True while the underlying WebSocket to the Relay is open."""
         return self._ws.state.name == "OPEN"
 
+    @property
+    def opponent_connected(self) -> bool:
+        """True while the opponent seat is occupied (not in reconnect grace)."""
+        return self._opponent_connected
+
+    def set_status_listener(
+        self, listener: Callable[[str], None] | None
+    ) -> None:
+        """Set or clear the callback for human-readable opponent link status updates."""
+        self._status_listener = listener
+
+    def _emit_status(self, text: str) -> None:
+        if self._status_listener is not None:
+            self._status_listener(text)
+
     def _arm_turns_if_ready(self) -> None:
         if self.ready_to_fire and self._role is not None:
             self._my_turn = self._role == "host"
@@ -177,6 +204,27 @@ class MatchConnection:
     async def wait_for_player_joined(self) -> None:
         await self._expect(MsgType.PLAYER_JOINED)
 
+    async def leave_match(self) -> None:
+        """Signal intentional quit so the Relay Abandons immediately for the opponent."""
+        await self._send({"type": MsgType.LEAVE_MATCH})
+        self._log().info("match_leave_sent")
+
+    async def wait_for_opponent_disconnected(self) -> float:
+        """Block until the Relay reports the opponent dropped; return grace seconds."""
+        if not self._opponent_connected and self._opponent_grace_seconds is not None:
+            return self._opponent_grace_seconds
+        while self._opponent_connected:
+            await self._pump_one()
+        assert self._opponent_grace_seconds is not None
+        return self._opponent_grace_seconds
+
+    async def wait_for_opponent_reconnected(self) -> None:
+        """Block until the Relay reports the opponent reseated after a drop."""
+        if self._opponent_connected:
+            return
+        while not self._opponent_connected:
+            await self._pump_one()
+
     async def lock_placement(self, placement: Placement) -> str:
         """Validate Placement, seal it, and publish the Placement Commitment."""
         commitment = placement_commitment(placement)
@@ -194,15 +242,33 @@ class MatchConnection:
         if self._opponent_commitment is not None:
             self._arm_turns_if_ready()
             return self._opponent_commitment
-        reply = await self._expect(MsgType.PLACEMENT_COMMITMENT)
-        value = reply.get("commitment")
-        if not isinstance(value, str) or not value:
-            raise MatchConnectionError(
-                "unexpected", "Placement Commitment missing commitment"
-            )
-        self._opponent_commitment = value
-        self._arm_turns_if_ready()
-        return value
+        while True:
+            reply = await self._recv()
+            if reply.get("type") == MsgType.MATCH_END:
+                end = self._parse_match_end(reply)
+                self._match_end = end
+                raise MatchConnectionError(
+                    "match_ended",
+                    "Match ended before opponent Placement Commitment",
+                )
+            if reply.get("type") == MsgType.ERROR:
+                raise MatchConnectionError(
+                    str(reply.get("code", "")),
+                    str(reply.get("message", "")),
+                )
+            if reply.get("type") != MsgType.PLACEMENT_COMMITMENT:
+                raise MatchConnectionError(
+                    "unexpected",
+                    f"Unexpected reply: {reply.get('type')}",
+                )
+            value = reply.get("commitment")
+            if not isinstance(value, str) or not value:
+                raise MatchConnectionError(
+                    "unexpected", "Placement Commitment missing commitment"
+                )
+            self._opponent_commitment = value
+            self._arm_turns_if_ready()
+            return value
 
     async def fire_shot(self, coordinate_text: str) -> ShotReport:
         """Fire one Shot on our turn; wait for the Board owner's answer (and Reveals)."""
@@ -462,18 +528,45 @@ class MatchConnection:
 
     def _parse_match_end(self, reply: dict[str, Any]) -> MatchEnd:
         outcome_raw = reply.get("outcome")
+        reason_raw = reply.get("reason")
+        reason = reason_raw if isinstance(reason_raw, str) else None
         if outcome_raw == MatchOutcome.ABANDONED:
-            return MatchEnd(outcome=MatchOutcome.ABANDONED)
+            return MatchEnd(outcome=MatchOutcome.ABANDONED, reason=reason)
         if outcome_raw == MatchOutcome.WINNER:
             winner = reply.get("winner")
             if winner not in ("host", "guest"):
                 raise MatchConnectionError(
                     "unexpected", "Winner Match end missing winner role"
                 )
-            return MatchEnd(outcome=MatchOutcome.WINNER, winner=winner)
+            return MatchEnd(outcome=MatchOutcome.WINNER, winner=winner, reason=reason)
         raise MatchConnectionError(
             "unexpected", f"Unknown Match end outcome: {outcome_raw!r}"
         )
+
+    def _handle_opponent_control(self, message: dict[str, Any]) -> bool:
+        """Apply opponent link control messages. Return True if consumed."""
+        msg_type = message.get("type")
+        if msg_type == MsgType.OPPONENT_DISCONNECTED:
+            grace_raw = message.get("grace_seconds")
+            grace = (
+                float(grace_raw)
+                if isinstance(grace_raw, (int, float))
+                else self._grace_seconds
+            )
+            self._opponent_connected = False
+            self._opponent_grace_seconds = grace
+            self._emit_status(
+                f"Opponent disconnected — reconnecting ({grace:g}s)…"
+            )
+            self._log().info("opponent_disconnected", grace_seconds=grace)
+            return True
+        if msg_type == MsgType.OPPONENT_RECONNECTED:
+            self._opponent_connected = True
+            self._opponent_grace_seconds = None
+            self._emit_status("Opponent reconnected.")
+            self._log().info("opponent_reconnected")
+            return True
+        return False
 
     async def _expect(self, expected: MsgType) -> dict[str, Any]:
         reply = await self._recv()
@@ -492,10 +585,25 @@ class MatchConnection:
     async def _send(self, message: dict[str, Any]) -> None:
         await self._ws.send(encode(message))
 
-    async def _recv(self) -> dict[str, Any]:
+    async def _pump_one(self) -> None:
+        """Read one wire message: apply control side-effects or enqueue for `_recv`."""
         raw = await self._ws.recv()
         text = raw if isinstance(raw, str) else raw.decode()
-        return decode(text)
+        message = decode(text)
+        if self._handle_opponent_control(message):
+            return
+        self._inbox.append(message)
+
+    async def _recv(self) -> dict[str, Any]:
+        while True:
+            if self._inbox:
+                return self._inbox.popleft()
+            raw = await self._ws.recv()
+            text = raw if isinstance(raw, str) else raw.decode()
+            message = decode(text)
+            if self._handle_opponent_control(message):
+                continue
+            return message
 
 
 # Re-export rule errors for seam callers

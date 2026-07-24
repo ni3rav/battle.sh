@@ -15,12 +15,19 @@ class MsgType(StrEnum):
     PLAYER_JOINED = "player_joined"
     RECONNECT_MATCH = "reconnect_match"
     MATCH_RESUMED = "match_resumed"
+    LEAVE_MATCH = "leave_match"
+    OPPONENT_DISCONNECTED = "opponent_disconnected"
+    OPPONENT_RECONNECTED = "opponent_reconnected"
     PLACEMENT_COMMITMENT = "placement_commitment"
     SHOT = "shot"
     SHOT_RESULT = "shot_result"
     REVEAL = "reveal"
     MATCH_END = "match_end"
     ERROR = "error"
+
+
+# Default reconnect grace window (seconds). Overridable via --grace-seconds.
+DEFAULT_GRACE_SECONDS = 10.0
 
 
 class MatchOutcome(StrEnum):

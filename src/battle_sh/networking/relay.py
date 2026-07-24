@@ -14,6 +14,7 @@ from websockets.exceptions import ConnectionClosed
 
 from battle_sh.networking.invite import mint_invite, normalize_invite
 from battle_sh.networking.protocol import (
+    DEFAULT_GRACE_SECONDS,
     KEEPALIVE_PING_INTERVAL,
     KEEPALIVE_PING_TIMEOUT,
     ErrorCode,
@@ -51,7 +52,7 @@ class _RelayState:
     seats: dict[ServerConnection, tuple[str, Role]] = field(
         default_factory=dict[ServerConnection, tuple[str, Role]]
     )
-    grace_seconds: float = 30.0
+    grace_seconds: float = DEFAULT_GRACE_SECONDS
 
 
 def _mint_invite() -> str:
@@ -108,12 +109,14 @@ async def _monitor_connection_health(
         return
 
 
-async def _abandon_match(state: _RelayState, invite: str) -> None:
+async def _abandon_match(
+    state: _RelayState, invite: str, *, reason: str | None = None
+) -> None:
     match = state.matches.pop(invite, None)
     if match is None or match.ended:
         return
     match.ended = True
-    _log().info("match_abandoned", session_id=invite)
+    _log().info("match_abandoned", session_id=invite, reason=reason)
     current = asyncio.current_task()
     for task in (match.host_grace, match.guest_grace):
         if task is None or task is current or task.done():
@@ -123,15 +126,28 @@ async def _abandon_match(state: _RelayState, invite: str) -> None:
             await task
     match.host_grace = None
     match.guest_grace = None
+    payload: dict[str, Any] = {
+        "type": MsgType.MATCH_END,
+        "outcome": MatchOutcome.ABANDONED,
+    }
+    if reason is not None:
+        payload["reason"] = reason
     for ws in (match.host, match.guest):
         if ws is None:
             continue
         state.seats.pop(ws, None)
         with contextlib.suppress(ConnectionClosed):
-            await _send(
-                ws,
-                {"type": MsgType.MATCH_END, "outcome": MatchOutcome.ABANDONED},
-            )
+            await _send(ws, payload)
+
+
+async def _notify_other(
+    match: _Match, role: Role, message: dict[str, Any]
+) -> None:
+    other = match.guest if role == "host" else match.host
+    if other is None:
+        return
+    with contextlib.suppress(ConnectionClosed):
+        await _send(other, message)
 
 
 async def _start_grace(state: _RelayState, invite: str, role: Role) -> None:
@@ -306,6 +322,33 @@ async def _handle_reconnect(
         {"type": MsgType.MATCH_RESUMED, "invite": invite, "role": claimed_role},
     )
     log.info("match_resumed", session_id=invite, role=claimed_role)
+    other = match.guest if claimed_role == "host" else match.host
+    if other is not None:
+        await _send(other, {"type": MsgType.OPPONENT_RECONNECTED})
+
+
+async def _handle_leave(
+    ws: ServerConnection, state: _RelayState, log: structlog.stdlib.BoundLogger
+) -> None:
+    seat = state.seats.get(ws)
+    if seat is None:
+        await _send(ws, error_message(ErrorCode.NOT_IN_MATCH, "Not in a Match"))
+        log.warning("leave_rejected", reason="not_in_match")
+        return
+    invite, role = seat
+    match = state.matches.get(invite)
+    if match is None or match.ended:
+        state.seats.pop(ws, None)
+        await _send(ws, error_message(ErrorCode.UNKNOWN_INVITE, "Unknown Invite"))
+        log.warning("leave_rejected", reason="unknown_invite", session_id=invite)
+        return
+    state.seats.pop(ws, None)
+    if role == "host":
+        match.host = None
+    else:
+        match.guest = None
+    log.info("match_left", session_id=invite, role=role)
+    await _abandon_match(state, invite, reason="left")
 
 
 async def _on_disconnect(ws: ServerConnection, state: _RelayState) -> None:
@@ -320,6 +363,14 @@ async def _on_disconnect(ws: ServerConnection, state: _RelayState) -> None:
         match.host = None
     else:
         match.guest = None
+    await _notify_other(
+        match,
+        role,
+        {
+            "type": MsgType.OPPONENT_DISCONNECTED,
+            "grace_seconds": state.grace_seconds,
+        },
+    )
     # Both seats empty with no grace yet: still start grace for the departing seat.
     # If the other seat is also vacant and its grace already running, either expiry abandons.
     await _start_grace(state, invite, role)
@@ -370,6 +421,8 @@ async def _handle_client(ws: ServerConnection, state: _RelayState) -> None:
                 await _handle_reconnect(
                     ws, state, message.get("invite"), message.get("role"), log
                 )
+            elif msg_type == MsgType.LEAVE_MATCH:
+                await _handle_leave(ws, state, log)
             else:
                 seat = state.seats.get(ws)
                 if seat is None:
@@ -447,7 +500,7 @@ async def start_relay(
     bind_host: str = "127.0.0.1",
     port: int = 0,
     *,
-    grace_seconds: float = 30.0,
+    grace_seconds: float = DEFAULT_GRACE_SECONDS,
 ) -> AsyncGenerator[str, None]:
     """Start a local Relay; yield a ws:// URL callers can connect to."""
     state = _RelayState(grace_seconds=grace_seconds)
@@ -474,7 +527,7 @@ async def run_relay(
     bind_host: str = "127.0.0.1",
     port: int = 8765,
     *,
-    grace_seconds: float = 30.0,
+    grace_seconds: float = DEFAULT_GRACE_SECONDS,
 ) -> None:
     """Serve the Relay until cancelled (systemd / local process entry)."""
     state = _RelayState(grace_seconds=grace_seconds)

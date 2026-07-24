@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import os
 
+from battle_sh.networking.protocol import DEFAULT_GRACE_SECONDS
 from battle_sh.networking.relay import run_relay
 from battle_sh.observability import configure_client_logging, configure_logging
 from battle_sh.ui.play import LiveIO, run_guest, run_host
@@ -24,7 +25,6 @@ from battle_sh.ui.play import LiveIO, run_guest, run_host
 DEFAULT_RELAY = "ws://127.0.0.1:8765"
 DEFAULT_BIND_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-DEFAULT_GRACE_SECONDS = 30.0
 
 
 def _default_relay() -> str:

@@ -234,6 +234,7 @@ async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
                 await guest.wait_for_opponent_commitment()
                 end = await guest.wait_for_match_end()
                 guest_outcome.append(str(end.outcome))
+                guest_outcome.append(end.reason or "")
             finally:
                 await guest.close()
 
@@ -243,7 +244,7 @@ async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
         )
 
     assert any("Quitting" in o or "Abandoned" in o for o in host_io.outputs)
-    assert guest_outcome == ["abandoned"]
+    assert guest_outcome == ["abandoned", "left"]
 
 
 async def test_host_quit_during_aim_abandons_for_guest() -> None:

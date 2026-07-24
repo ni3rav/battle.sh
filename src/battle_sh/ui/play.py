@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -13,12 +14,13 @@ from battle_sh.networking.connection import (
     IllegalShotError,
     MatchConnection,
     MatchConnectionError,
+    MatchEnd,
     NotYourTurnError,
     RevealVerificationError,
     ShotReport,
     close_code_and_reason,
 )
-from battle_sh.networking.protocol import MatchOutcome
+from battle_sh.networking.protocol import DEFAULT_GRACE_SECONDS, MatchOutcome
 from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import (
     STANDARD_FLEET_LENGTHS,
@@ -47,6 +49,12 @@ T = TypeVar("T")
 
 _FLEET_SIZE = len(STANDARD_FLEET_LENGTHS)
 _TOTAL_CELLS = sum(STANDARD_FLEET_LENGTHS.values())
+
+
+async def _leave_on_quit(conn: MatchConnection) -> None:
+    """Tell the Relay this was intentional so the opponent skips reconnect grace."""
+    with contextlib.suppress(ConnectionClosed, OSError, MatchConnectionError):
+        await conn.leave_match()
 
 
 def _your_fleet_status(
@@ -85,7 +93,7 @@ def _phase_status(
         enemy_hits=0,
         total_cells=_TOTAL_CELLS,
         you_connected=connected,
-        opponent_connected=connected and opponent_present,
+        opponent_connected=connected and opponent_present and conn.opponent_connected,
         synchronized=conn.ready_to_fire,
     )
 
@@ -146,7 +154,7 @@ async def run_host(
     *,
     placement_factory: Callable[[], Placement] | None = None,
     on_invite: Callable[[str], None] | None = None,
-    grace_seconds: float = 30.0,
+    grace_seconds: float = DEFAULT_GRACE_SECONDS,
 ) -> None:
     io.print(f"Connecting to Relay {relay_url} as Host…")
     try:
@@ -172,6 +180,7 @@ async def run_host(
                 ),
             ),
             initial_status="Waiting for Guest…",
+            conn=conn,
         )
         match_started_at = io.clock.now()
         io.print("Guest joined.")
@@ -191,8 +200,10 @@ async def run_host(
 
         await _play_match(conn, placement, io, role="Host", match_started_at=match_started_at)
     except QuitRequested:
+        await _leave_on_quit(conn)
         io.print("Quitting. Match Abandoned for your opponent.")
     except KeyboardInterrupt:
+        await _leave_on_quit(conn)
         io.print("Quitting. Match Abandoned for your opponent.")
     except ConnectionClosed as exc:
         io.print(_connection_lost_message(exc))
@@ -208,7 +219,7 @@ async def run_guest(
     io: LiveIO | ScriptedIO,
     *,
     placement_factory: Callable[[], Placement] | None = None,
-    grace_seconds: float = 30.0,
+    grace_seconds: float = DEFAULT_GRACE_SECONDS,
 ) -> None:
     io.print(f"Connecting to Relay {relay_url} as Guest…")
     try:
@@ -234,8 +245,10 @@ async def run_guest(
 
         await _play_match(conn, placement, io, role="Guest", match_started_at=match_started_at)
     except QuitRequested:
+        await _leave_on_quit(conn)
         io.print("Quitting. Match Abandoned for your opponent.")
     except KeyboardInterrupt:
+        await _leave_on_quit(conn)
         io.print("Quitting. Match Abandoned for your opponent.")
     except ConnectionClosed as exc:
         io.print(_connection_lost_message(exc))
@@ -267,6 +280,7 @@ async def _wait_for_opponent_commitment(
             ),
         ),
         initial_status="Waiting for opponent to lock…",
+        conn=conn,
     )
 
 
@@ -298,6 +312,7 @@ async def _live_wait(
     *,
     frame: Callable[[str, int], object],
     initial_status: str,
+    conn: MatchConnection | None = None,
 ) -> T:
     status = initial_status
     spin = 0
@@ -305,6 +320,9 @@ async def _live_wait(
     def on_message(text: str) -> None:
         nonlocal status
         status = text
+
+    if conn is not None:
+        conn.set_status_listener(on_message)
 
     with Live(
         frame(status, spin),  # type: ignore[arg-type]
@@ -318,13 +336,17 @@ async def _live_wait(
             spin += 1
             live.update(frame(status, spin), refresh=True)  # type: ignore[arg-type]
 
-        return await wait_honoring_quit(
-            awaitable,
-            keys=io.keys,
-            clock=io.clock,
-            on_message=on_message,
-            on_tick=on_tick,
-        )
+        try:
+            return await wait_honoring_quit(
+                awaitable,
+                keys=io.keys,
+                clock=io.clock,
+                on_message=on_message,
+                on_tick=on_tick,
+            )
+        finally:
+            if conn is not None:
+                conn.set_status_listener(None)
 
 
 async def _play_match(
@@ -368,7 +390,7 @@ async def _play_match(
             enemy_hits=_count_hits(own_marks),
             total_cells=_TOTAL_CELLS,
             you_connected=connected,
-            opponent_connected=connected and not over,
+            opponent_connected=connected and not over and conn.opponent_connected,
             synchronized=conn.ready_to_fire,
             your_fleet=your_fleet,
             enemy_sunk=tuple(enemy_sunk_ships),
@@ -420,6 +442,7 @@ async def _play_match(
                         status_info=match_status(),
                     ),
                     initial_status=wait_status,
+                    conn=conn,
                 )
                 if report.match_end is not None:
                     freeze_match_time()
@@ -430,9 +453,7 @@ async def _play_match(
         io.print(f"Connection issue: {exc}")
         match_time = freeze_match_time()
         end = await conn.wait_for_match_end()
-        _announce_end(
-            io, end.outcome, end.winner, verification_ok, conn.role, match_time
-        )
+        _announce_end(io, end, verification_ok, conn.role, match_time)
         return
     except RevealVerificationError as exc:
         io.print(f"Commitment verification failed: {exc}")
@@ -441,18 +462,14 @@ async def _play_match(
         end = conn.match_end
         if end is None:
             end = await conn.wait_for_match_end()
-        _announce_end(
-            io, end.outcome, end.winner, verification_ok, conn.role, match_time
-        )
+        _announce_end(io, end, verification_ok, conn.role, match_time)
         return
 
     match_time = freeze_match_time()
     end = conn.match_end
     if end is None:
         end = await conn.wait_for_match_end()
-    _announce_end(
-        io, end.outcome, end.winner, verification_ok, conn.role, match_time
-    )
+    _announce_end(io, end, verification_ok, conn.role, match_time)
 
 
 async def _take_shot_until_legal(
@@ -541,19 +558,20 @@ def _format_shot_feedback(report: ShotReport, *, outgoing: bool) -> str:
 
 def _announce_end(
     io: LiveIO | ScriptedIO,
-    outcome: MatchOutcome,
-    winner: str | None,
+    end: MatchEnd,
     verification_ok: bool | None,
     role: str | None,
     match_time: str,
 ) -> None:
-    if outcome == MatchOutcome.ABANDONED:
+    if end.outcome == MatchOutcome.ABANDONED:
+        if end.reason == "left":
+            io.print("Opponent left the Match.")
         io.print("Match Abandoned (no Winner).")
-    elif outcome == MatchOutcome.WINNER:
-        if winner == role:
+    elif end.outcome == MatchOutcome.WINNER:
+        if end.winner == role:
             io.print("You win!")
         else:
-            io.print(f"Winner: {winner}.")
+            io.print(f"Winner: {end.winner}.")
     io.print(f"Match time {match_time}")
     if verification_ok is True:
         io.print("Commitment verification: OK.")

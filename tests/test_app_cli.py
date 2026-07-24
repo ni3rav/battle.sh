@@ -26,7 +26,7 @@ def test_relay_defaults() -> None:
     args = app.build_parser().parse_args(["relay"])
     assert args.bind_host == "127.0.0.1"
     assert args.port == 8765
-    assert args.grace_seconds == 30.0
+    assert args.grace_seconds == 10.0
 
 
 def test_host_relay_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
