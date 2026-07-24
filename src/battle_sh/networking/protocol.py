@@ -31,6 +31,13 @@ class MatchOutcome(StrEnum):
 Role = Literal["host", "guest"]
 
 
+# WebSocket keepalive (seconds). Both Relay and clients ping on this interval and
+# close a peer that fails to pong within the timeout. Clients keep the event loop
+# free during input so pongs are always answered promptly (see ui.play).
+KEEPALIVE_PING_INTERVAL = 20.0
+KEEPALIVE_PING_TIMEOUT = 20.0
+
+
 class ErrorCode(StrEnum):
     MATCH_FULL = "match_full"
     UNKNOWN_INVITE = "unknown_invite"

@@ -4,8 +4,20 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import tempfile
 
+from battle_sh.observability import configure_logging
 from battle_sh.ui.play import LiveIO, run_guest, run_host
+
+
+def _configure_client_logging(role: str) -> None:
+    """Route client logs to a file so they never corrupt the terminal UI."""
+    log_file = os.environ.get("BATTLE_SH_LOG_FILE")
+    if not log_file:
+        log_dir = os.path.join(tempfile.gettempdir(), "battle-sh")
+        log_file = os.path.join(log_dir, f"{role}-{os.getpid()}.log")
+    configure_logging(component=f"client-{role}", log_file=log_file)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -34,6 +46,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Invite phrase (Guest only; prompted if omitted)",
     )
     args = parser.parse_args(argv)
+    _configure_client_logging(args.role)
     io = LiveIO()
 
     if args.role == "host":
