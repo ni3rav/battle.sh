@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -100,6 +101,7 @@ class MatchConnection:
     _conn_id: str = field(default_factory=new_conn_id)
     _opponent_connected: bool = True
     _opponent_grace_seconds: float | None = None
+    _opponent_disconnected_at: float | None = None
     _status_listener: Callable[[str], None] | None = None
     _inbox: deque[dict[str, Any]] = field(
         default_factory=lambda: deque[dict[str, Any]]()
@@ -165,6 +167,21 @@ class MatchConnection:
     ) -> None:
         """Set or clear the callback for human-readable opponent link status updates."""
         self._status_listener = listener
+
+    def opponent_reconnect_status(self) -> str | None:
+        """Live reconnect countdown text, or None when the opponent seat is filled."""
+        if self._opponent_connected:
+            return None
+        if (
+            self._opponent_grace_seconds is None
+            or self._opponent_disconnected_at is None
+        ):
+            return "Opponent disconnected — reconnecting…"
+        remaining = self._opponent_grace_seconds - (
+            time.monotonic() - self._opponent_disconnected_at
+        )
+        remaining = max(0.0, remaining)
+        return f"Opponent disconnected — reconnecting ({remaining:.0f}s)…"
 
     def _emit_status(self, text: str) -> None:
         if self._status_listener is not None:
@@ -555,14 +572,16 @@ class MatchConnection:
             )
             self._opponent_connected = False
             self._opponent_grace_seconds = grace
-            self._emit_status(
-                f"Opponent disconnected — reconnecting ({grace:g}s)…"
-            )
+            self._opponent_disconnected_at = time.monotonic()
+            status = self.opponent_reconnect_status()
+            if status is not None:
+                self._emit_status(status)
             self._log().info("opponent_disconnected", grace_seconds=grace)
             return True
         if msg_type == MsgType.OPPONENT_RECONNECTED:
             self._opponent_connected = True
             self._opponent_grace_seconds = None
+            self._opponent_disconnected_at = None
             self._emit_status("Opponent reconnected.")
             self._log().info("opponent_reconnected")
             return True
@@ -585,11 +604,14 @@ class MatchConnection:
     async def _send(self, message: dict[str, Any]) -> None:
         await self._ws.send(encode(message))
 
-    async def _pump_one(self) -> None:
-        """Read one wire message: apply control side-effects or enqueue for `_recv`."""
+    async def _read_wire(self) -> dict[str, Any]:
         raw = await self._ws.recv()
         text = raw if isinstance(raw, str) else raw.decode()
-        message = decode(text)
+        return decode(text)
+
+    async def _pump_one(self) -> None:
+        """Read one wire message: apply control side-effects or enqueue for `_recv`."""
+        message = await self._read_wire()
         if self._handle_opponent_control(message):
             return
         self._inbox.append(message)
@@ -598,9 +620,7 @@ class MatchConnection:
         while True:
             if self._inbox:
                 return self._inbox.popleft()
-            raw = await self._ws.recv()
-            text = raw if isinstance(raw, str) else raw.decode()
-            message = decode(text)
+            message = await self._read_wire()
             if self._handle_opponent_control(message):
                 continue
             return message

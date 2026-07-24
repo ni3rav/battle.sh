@@ -148,6 +148,26 @@ class LiveIO:
         return self.console.input(prompt)
 
 
+async def _announce_match_end_or_error(
+    io: LiveIO | ScriptedIO,
+    conn: MatchConnection,
+    exc: MatchConnectionError,
+    *,
+    match_started_at: float | None,
+    verification_ok: bool | None = None,
+) -> None:
+    end = conn.match_end
+    if end is not None:
+        match_time = (
+            format_elapsed(io.clock.now() - match_started_at)
+            if match_started_at is not None
+            else "0:00"
+        )
+        _announce_end(io, end, verification_ok, conn.role, match_time)
+        return
+    io.print(f"Match error: {exc.message}. Exiting.")
+
+
 async def run_host(
     relay_url: str,
     io: LiveIO | ScriptedIO,
@@ -162,6 +182,7 @@ async def run_host(
     except OSError as exc:
         io.print(f"Could not connect to Relay {relay_url}: {exc}")
         return
+    match_started_at: float | None = None
     try:
         invite = await conn.create_match()
         if on_invite is not None:
@@ -208,7 +229,9 @@ async def run_host(
     except ConnectionClosed as exc:
         io.print(_connection_lost_message(exc))
     except MatchConnectionError as exc:
-        io.print(f"Match error: {exc.message}. Exiting.")
+        await _announce_match_end_or_error(
+            io, conn, exc, match_started_at=match_started_at
+        )
     finally:
         await conn.close()
 
@@ -227,6 +250,7 @@ async def run_guest(
     except OSError as exc:
         io.print(f"Could not connect to Relay {relay_url}: {exc}")
         return
+    match_started_at: float | None = None
     try:
         await conn.join_match(invite)
         match_started_at = io.clock.now()
@@ -253,7 +277,9 @@ async def run_guest(
     except ConnectionClosed as exc:
         io.print(_connection_lost_message(exc))
     except MatchConnectionError as exc:
-        io.print(f"Match error: {exc.message}. Exiting.")
+        await _announce_match_end_or_error(
+            io, conn, exc, match_started_at=match_started_at
+        )
     finally:
         await conn.close()
 
@@ -332,8 +358,12 @@ async def _live_wait(
     ) as live:
 
         def on_tick() -> None:
-            nonlocal spin
+            nonlocal spin, status
             spin += 1
+            if conn is not None:
+                reconnect = conn.opponent_reconnect_status()
+                if reconnect is not None:
+                    status = reconnect
             live.update(frame(status, spin), refresh=True)  # type: ignore[arg-type]
 
         try:
@@ -566,7 +596,8 @@ def _announce_end(
     if end.outcome == MatchOutcome.ABANDONED:
         if end.reason == "left":
             io.print("Opponent left the Match.")
-        io.print("Match Abandoned (no Winner).")
+        else:
+            io.print("Match Abandoned (no Winner).")
     elif end.outcome == MatchOutcome.WINNER:
         if end.winner == role:
             io.print("You win!")
