@@ -2,13 +2,33 @@
 
 from __future__ import annotations
 
+import select
+import sys
+import types
 from collections import deque
 
 import pytest
 
 from battle_sh.ui.clock import FakeClock
-from battle_sh.ui.keys import INTERRUPT, Key, ScriptedKeySource
+from battle_sh.ui.keys import INTERRUPT, Key, ScriptedKeySource, TerminalKeySource
 from battle_sh.ui.play import ScriptedIO
+
+
+def test_terminal_try_read_survives_windows_stdin_select(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WinError 10038: select cannot poll stdin on Windows; try_read must not raise."""
+    def boom(*_a: object, **_k: object) -> list[object]:
+        # WinError 10038 as raised by select(stdin) on Windows.
+        raise OSError(
+            10038, "An operation was attempted on something that is not a socket"
+        )
+
+    monkeypatch.setattr(select, "select", boom)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "msvcrt", types.SimpleNamespace(kbhit=lambda: 0))
+
+    assert TerminalKeySource().try_read(0.0) is None
 
 
 def test_scripted_key_source_yields_immediate_keys_in_order() -> None:

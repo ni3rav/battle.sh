@@ -107,6 +107,35 @@ _RAW_TO_NAME: dict[str, str] = {
 }
 
 
+def _stdin_ready(timeout: float) -> bool:
+    """True if stdin has a key waiting within ``timeout`` seconds.
+
+    On Windows, ``select`` only accepts sockets (WinError 10038 on stdin), so
+    we poll with ``msvcrt.kbhit`` instead.
+    """
+    import sys
+
+    if sys.platform == "win32":
+        import msvcrt
+        import time
+
+        if timeout <= 0:
+            return bool(msvcrt.kbhit())
+        deadline = time.monotonic() + timeout
+        while True:
+            if msvcrt.kbhit():
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(0.01, remaining))
+
+    import select
+
+    ready, _, _ = select.select([sys.stdin], [], [], timeout)
+    return bool(ready)
+
+
 class TerminalKeySource:
     """Production KeySource: reads raw terminal keys via readchar."""
 
@@ -120,10 +149,6 @@ class TerminalKeySource:
         return Key(raw)
 
     def try_read(self, timeout: float = 0.0) -> Key | None:
-        import select
-        import sys
-
-        ready, _, _ = select.select([sys.stdin], [], [], timeout)
-        if not ready:
+        if not _stdin_ready(timeout):
             return None
         return self.read()
