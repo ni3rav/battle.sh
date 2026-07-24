@@ -130,13 +130,39 @@ async def test_combat_wait_ignores_aim_keys_until_awaitable_done() -> None:
 
 async def test_wait_honoring_quit_q_raises_quit_requested() -> None:
     clock = FakeClock()
-    keys = ScriptedKeySource(["q"])
+    keys = ScriptedKeySource(["q", "q"])
+    messages: list[str] = []
 
     async def never() -> None:
         await asyncio.sleep(60)
 
     with pytest.raises(QuitRequested):
-        await wait_honoring_quit(never(), keys=keys, clock=clock)
+        await wait_honoring_quit(
+            never(),
+            keys=keys,
+            clock=clock,
+            on_message=messages.append,
+        )
+    assert any("again" in m.lower() for m in messages)
+
+
+async def test_wait_honoring_quit_single_q_only_warns() -> None:
+    clock = FakeClock()
+    keys = ScriptedKeySource(["q"], poll_all=True)
+    messages: list[str] = []
+
+    async def done_soon() -> str:
+        await asyncio.sleep(0.15)
+        return "ok"
+
+    result = await wait_honoring_quit(
+        done_soon(),
+        keys=keys,
+        clock=clock,
+        on_message=messages.append,
+    )
+    assert result == "ok"
+    assert any("again" in m.lower() for m in messages)
 
 
 def test_scripted_try_read_leaves_placement_keys_for_read() -> None:
@@ -172,7 +198,25 @@ async def test_wait_honoring_ctrl_c_arm_then_confirm() -> None:
             on_message=messages.append,
             on_tick=on_tick,
         )
-    assert any("ctrl+c" in m.lower() or "again" in m.lower() for m in messages)
+    assert any("again" in m.lower() for m in messages)
+
+
+async def test_wait_honoring_q_then_ctrl_c_confirms() -> None:
+    clock = FakeClock(start=0.0)
+    keys = ScriptedKeySource(["q", "ctrl+c"])
+    messages: list[str] = []
+
+    async def never() -> None:
+        await asyncio.sleep(60)
+
+    with pytest.raises(QuitRequested):
+        await wait_honoring_quit(
+            never(),
+            keys=keys,
+            clock=clock,
+            on_message=messages.append,
+        )
+    assert any("again" in m.lower() for m in messages)
 
 
 async def test_placement_top_info_includes_match_time_from_clock() -> None:

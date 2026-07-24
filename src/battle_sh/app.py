@@ -93,41 +93,53 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _run_host(args: argparse.Namespace) -> None:
     configure_client_logging("host")
-    asyncio.run(
-        run_host(args.relay, LiveIO(), grace_seconds=args.grace_seconds)
-    )
+    try:
+        asyncio.run(
+            run_host(args.relay, LiveIO(), grace_seconds=args.grace_seconds)
+        )
+    except KeyboardInterrupt:
+        print("Interrupted. Exiting.")
 
 
 def _run_join(args: argparse.Namespace) -> None:
     configure_client_logging("guest")
     io = LiveIO()
-    invite = args.invite
-    if not invite:
-        invite = io.ask("Paste Invite phrase (or q to quit)> ").strip()
-    if invite.lower() in {"q", "quit", "exit"}:
-        raise SystemExit(0)
-    if not invite:
-        raise SystemExit("Invite is required to join a game")
-    asyncio.run(
-        run_guest(args.relay, invite, io, grace_seconds=args.grace_seconds)
-    )
+    try:
+        invite = args.invite
+        if not invite:
+            invite = io.ask("Paste Invite phrase (or q to quit)> ").strip()
+        if invite.lower() in {"q", "quit", "exit"}:
+            raise SystemExit(0)
+        if not invite:
+            raise SystemExit("Invite is required to join a game")
+        asyncio.run(
+            run_guest(args.relay, invite, io, grace_seconds=args.grace_seconds)
+        )
+    except KeyboardInterrupt:
+        print("Interrupted. Exiting.")
 
 
 def _run_relay(args: argparse.Namespace) -> None:
     configure_logging(component="relay")
-    asyncio.run(
-        run_relay(args.bind_host, args.port, grace_seconds=args.grace_seconds)
-    )
+    try:
+        asyncio.run(
+            run_relay(args.bind_host, args.port, grace_seconds=args.grace_seconds)
+        )
+    except KeyboardInterrupt:
+        print("Relay stopped.")
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = build_parser().parse_args(argv)
-    if args.command == "host":
-        _run_host(args)
-    elif args.command == "join":
-        _run_join(args)
-    elif args.command == "relay":
-        _run_relay(args)
+    try:
+        args = build_parser().parse_args(argv)
+        if args.command == "host":
+            _run_host(args)
+        elif args.command == "join":
+            _run_join(args)
+        elif args.command == "relay":
+            _run_relay(args)
+    except KeyboardInterrupt:
+        print("Interrupted. Exiting.")
 
 
 if __name__ == "__main__":

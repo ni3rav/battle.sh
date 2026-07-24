@@ -1,4 +1,4 @@
-"""Two-step Ctrl+C Abandon arming via an injectable Clock."""
+"""Two-step quit Abandon arming via an injectable Clock."""
 
 from __future__ import annotations
 
@@ -9,11 +9,16 @@ from battle_sh.ui.clock import Clock
 ArmResult = Literal["warn", "confirm"]
 
 ARM_WINDOW_SECONDS = 3.0
-CTRL_C_WARN = "Press Ctrl+C again within 3s to quit."
+QUIT_WARN = "Press q or Ctrl+C again within 3s to quit."
+# Back-compat alias for callers/tests that still import the old name.
+CTRL_C_WARN = QUIT_WARN
 
 
 class QuitArm:
-    """First Ctrl+C warns; second within ``window`` seconds confirms Abandon."""
+    """First ``q`` / Ctrl+C warns; second within ``window`` seconds confirms Abandon.
+
+    Either quit key arms or confirms the same window (they may be mixed).
+    """
 
     def __init__(
         self, clock: Clock, *, window: float = ARM_WINDOW_SECONDS
@@ -31,6 +36,7 @@ class QuitArm:
             self._until = None
 
     def handle_interrupt(self) -> ArmResult:
+        """Arm or confirm a quit (used for both ``q`` and Ctrl+C)."""
         self.expire_if_due()
         if self._until is not None:
             self._until = None

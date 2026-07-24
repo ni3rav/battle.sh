@@ -10,7 +10,7 @@ from battle_sh.ui.async_input import read_key_off_loop
 from battle_sh.ui.clock import Clock
 from battle_sh.ui.keys import MOVE_DELTA, Key, KeySource, key_token
 from battle_sh.ui.placement_flow import QuitRequested
-from battle_sh.ui.quit_arm import CTRL_C_WARN, QuitArm
+from battle_sh.ui.quit_arm import QUIT_WARN, QuitArm
 from rich.console import Console
 from rich.live import Live
 
@@ -29,12 +29,10 @@ def _apply_aim_key(
 ) -> tuple[Coordinate, str, _AimAction]:
     """Pure per-key Aim transition shared by the sync and async drivers."""
     token = key_token(key)
-    if token == "q":
-        return aim, status, "quit"
-    if key.is_interrupt:
+    if token == "q" or key.is_interrupt:
         if arm is None or arm.handle_interrupt() == "confirm":
             return aim, status, "quit"
-        return aim, CTRL_C_WARN, "continue"
+        return aim, QUIT_WARN, "continue"
     if token in _FIRE_KEYS:
         if aim in fired:
             return aim, "Already fired there.", "continue"

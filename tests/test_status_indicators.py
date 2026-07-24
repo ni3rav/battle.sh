@@ -27,7 +27,7 @@ def _placement() -> Placement:
     )
 
 
-def _export(frame: object, *, width: int = 120, height: int = 44) -> str:
+def _export(frame: object, *, width: int = 80, height: int = 24) -> str:
     console = Console(record=True, width=width, height=height, force_terminal=True)
     console.print(frame)  # type: ignore[arg-type]
     return console.export_text()
@@ -102,10 +102,10 @@ def test_combat_frame_status_shows_indicators_and_keeps_controls() -> None:
     assert "in sync" in text
     assert "State" in text
     assert "You" in text and "Opponent" in text
-    # Scoreboard visible.
-    assert "Ships afloat" in text
-    # Controls remain visible (fire), and combat never advertises "lock".
+    # Compact scoreboard + controls visible at typical terminal size.
+    assert "Ships" in text
     assert "fire" in text.lower()
+    assert "quit" in text.lower()
     assert "lock" not in text.lower()
 
 
@@ -127,7 +127,8 @@ def test_combat_wait_frame_status_marks_opponent_turn() -> None:
     )
     assert "Turn: Opponent" in text
     assert "Waiting" in text
-    assert "Ships afloat" in text
+    assert "Ships" in text
+    assert "quit" in text.lower()
     assert "fire" not in text.lower()
     assert "lock" not in text.lower()
 

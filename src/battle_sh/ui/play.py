@@ -192,6 +192,8 @@ async def run_host(
         await _play_match(conn, placement, io, role="Host", match_started_at=match_started_at)
     except QuitRequested:
         io.print("Quitting. Match Abandoned for your opponent.")
+    except KeyboardInterrupt:
+        io.print("Quitting. Match Abandoned for your opponent.")
     except ConnectionClosed as exc:
         io.print(_connection_lost_message(exc))
     except MatchConnectionError as exc:
@@ -232,6 +234,8 @@ async def run_guest(
 
         await _play_match(conn, placement, io, role="Guest", match_started_at=match_started_at)
     except QuitRequested:
+        io.print("Quitting. Match Abandoned for your opponent.")
+    except KeyboardInterrupt:
         io.print("Quitting. Match Abandoned for your opponent.")
     except ConnectionClosed as exc:
         io.print(_connection_lost_message(exc))
@@ -338,6 +342,7 @@ async def _play_match(
     verification_ok: bool | None = None
     last_shot: Coordinate | None = None
     frozen_match_time: str | None = None
+    status_message = ""
 
     def boards() -> CombatBoards:
         return CombatBoards(
@@ -389,6 +394,7 @@ async def _play_match(
                     elapsed=elapsed,
                     last_shot=last_shot,
                     status_info=match_status(),
+                    initial_status=status_message or "Your turn — Aim and fire.",
                 )
                 last_shot = parse_coordinate(report.coordinate)
                 _apply_outgoing(report, tracking, revealed)
@@ -396,27 +402,29 @@ async def _play_match(
                     enemy_sunk_ships.append(report.ship)
                 if report.verification_ok is not None:
                     verification_ok = report.verification_ok
+                status_message = _format_shot_feedback(report, outgoing=True)
                 if report.match_end is not None:
                     freeze_match_time()
                     break
             else:
+                wait_status = status_message or "Waiting for opponent…"
                 report = await _live_wait(
                     io,
                     conn.serve_opponent_shot(),
-                    frame=lambda status, spin: combat_wait_frame(
+                    frame=lambda status, spin, _ws=wait_status: combat_wait_frame(
                         role=role,
                         match_time=elapsed(),
                         boards=boards(),
                         spinner_frame=spin,
-                        status=status or "Waiting for opponent…",
+                        status=status or _ws,
                         status_info=match_status(),
                     ),
-                    initial_status="Waiting for opponent…",
+                    initial_status=wait_status,
                 )
                 if report.match_end is not None:
                     freeze_match_time()
                     break
-                io.print(_format_shot_feedback(report, outgoing=False))
+                status_message = _format_shot_feedback(report, outgoing=False)
                 _apply_incoming(report, own_marks)
     except (ConnectionClosed, asyncio.TimeoutError, MatchConnectionError) as exc:
         io.print(f"Connection issue: {exc}")
@@ -456,6 +464,7 @@ async def _take_shot_until_legal(
     elapsed: Callable[[], str],
     last_shot: Coordinate | None,
     status_info: MatchStatus | None = None,
+    initial_status: str = "Your turn — Aim and fire.",
 ) -> ShotReport:
     fired = frozenset(boards.tracking)
 
@@ -465,7 +474,7 @@ async def _take_shot_until_legal(
             match_time=elapsed(),
             boards=boards,
             aim=aim,
-            status=status or "Your turn — Aim and fire.",
+            status=status or initial_status,
             status_info=status_info,
         )
 
@@ -481,9 +490,7 @@ async def _take_shot_until_legal(
             frame=frame,
         )
         try:
-            report = await conn.fire_shot(str(aim))
-            io.print(_format_shot_feedback(report, outgoing=True))
-            return report
+            return await conn.fire_shot(str(aim))
         except (IllegalShotError, DuplicateShotError, NotYourTurnError) as exc:
             io.print(f"Try again: {exc}")
 

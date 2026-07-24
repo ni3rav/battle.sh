@@ -9,7 +9,7 @@ from typing import TypeVar
 from battle_sh.ui.clock import Clock
 from battle_sh.ui.keys import KeySource
 from battle_sh.ui.placement_flow import QuitRequested
-from battle_sh.ui.quit_arm import CTRL_C_WARN, QuitArm
+from battle_sh.ui.quit_arm import QUIT_WARN, QuitArm
 
 T = TypeVar("T")
 
@@ -23,7 +23,11 @@ async def wait_honoring_quit(
     on_tick: Callable[[], None] | None = None,
     poll_timeout: float = 0.05,
 ) -> T:
-    """Await ``awaitable`` while accepting only ``q`` / Ctrl+C to Abandon."""
+    """Await ``awaitable`` while accepting only ``q`` / Ctrl+C to Abandon.
+
+    Both quit keys share a two-step confirm (``QuitArm``): first warns, second
+    within the arm window raises ``QuitRequested``.
+    """
     arm = QuitArm(clock)
     task = asyncio.ensure_future(awaitable)
     try:
@@ -33,13 +37,12 @@ async def wait_honoring_quit(
             arm.expire_if_due()
             key = keys.try_read(poll_timeout)
             if key is not None:
-                if key.name.lower() == "q":
-                    raise QuitRequested
-                if key.is_interrupt:
+                token = key.name.lower()
+                if token == "q" or key.is_interrupt:
                     if arm.handle_interrupt() == "confirm":
                         raise QuitRequested
                     if on_message is not None:
-                        on_message(CTRL_C_WARN)
+                        on_message(QUIT_WARN)
                 # Non-quit keys from a TTY poll are ignored while waiting.
             try:
                 return await asyncio.wait_for(asyncio.shield(task), timeout=poll_timeout)

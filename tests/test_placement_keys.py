@@ -29,9 +29,26 @@ def test_y_locks_and_returns_legal_placement() -> None:
 
 
 def test_q_raises_quit_requested() -> None:
+    # Without a Clock there is no QuitArm — q quits immediately (scripted tests).
     keys = ScriptedKeySource(["q"])
     with pytest.raises(QuitRequested):
         run_placement(keys, placement_factory=_fixed_placement)
+
+
+def test_q_with_clock_requires_confirm() -> None:
+    from battle_sh.ui.clock import FakeClock
+
+    clock = FakeClock()
+    messages: list[str] = []
+    keys = ScriptedKeySource(["q", "q"])
+    with pytest.raises(QuitRequested):
+        run_placement(
+            keys,
+            placement_factory=_fixed_placement,
+            clock=clock,
+            on_message=messages.append,
+        )
+    assert any("again" in m.lower() for m in messages)
 
 
 def test_select_and_move_with_wasd() -> None:

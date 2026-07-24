@@ -63,6 +63,18 @@ def test_scripted_key_source_raises_when_exhausted() -> None:
         keys.read()
 
 
+def test_terminal_read_maps_keyboard_interrupt_to_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import readchar
+
+    def boom() -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(readchar, "readkey", boom)
+    assert TerminalKeySource().read() == INTERRUPT
+
+
 def test_scripted_io_injects_key_source_and_clock_without_tty() -> None:
     """Host/Guest IO accepts KeySource + Clock beside line ask (no real terminal)."""
     keys = ScriptedKeySource(["w", "ctrl+c"])

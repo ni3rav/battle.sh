@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from battle_sh.rules.board import ShotResultKind
 from battle_sh.rules.placement import Coordinate, Placement
 from battle_sh.ui.boards import own_board_renderable, tracking_board_renderable
-from rich.columns import Columns
 from rich.console import Group, RenderableType
 from rich.layout import Layout
 from rich.panel import Panel
@@ -23,7 +22,7 @@ PLACEMENT_CONTROLS = """\
   [bold]e[/] / [bold]r[/]          flip H↔V
   [bold]t[/]              new random
   [bold]y[/]              lock
-  [bold]q[/]              quit
+  [bold]q[/] / [bold]Ctrl+C[/]     quit (twice)
 """
 
 AIM_CONTROLS = """\
@@ -31,15 +30,13 @@ AIM_CONTROLS = """\
 
   [bold]w/a/s/d[/] / arrows move
   [bold]f[/] / Enter / Space fire
-  [bold]q[/]              quit
-  [bold]Ctrl+C[/]          quit (twice)
+  [bold]q[/] / [bold]Ctrl+C[/]     quit (twice)
 """
 
 WAIT_CONTROLS = """\
 [bold]Waiting[/]
 
-  [bold]q[/]              quit
-  [bold]Ctrl+C[/]          quit (twice)
+  [bold]q[/] / [bold]Ctrl+C[/]     quit (twice)
 """
 
 _SPINNER = ("|", "/", "-", "\\")
@@ -122,6 +119,25 @@ def scoreboard_renderable(status: MatchStatus) -> RenderableType:
         Text.from_markup("\n".join(fleet_lines)),
         Text(""),
         Text.from_markup(f"[bold]Enemy sunk[/]\n {enemy_sunk}"),
+    )
+
+
+def sidebar_scoreboard_renderable(status: MatchStatus) -> RenderableType:
+    """Short scoreboard for the combat sidebar (leaves room for controls)."""
+    sunk = sum(1 for _, afloat in status.your_fleet if not afloat)
+    enemy_sunk = ", ".join(status.enemy_sunk) if status.enemy_sunk else "none"
+    return Text.from_markup(
+        "\n".join(
+            [
+                f"[bold]State[/] {status.state}",
+                f"Ships [bold]{status.your_ships_afloat}[/]/"
+                f"{status.your_ships_total}  vs  "
+                f"[bold]{status.enemy_ships_afloat}[/]/{status.enemy_ships_total}",
+                f"Hits  [bold]{status.your_hits}[/]/{status.total_cells}  vs  "
+                f"[bold]{status.enemy_hits}[/]/{status.total_cells}",
+                f"Sunk you:{sunk}  enemy:{enemy_sunk}",
+            ]
+        )
     )
 
 
@@ -229,24 +245,39 @@ def wait_frame(
     )
 
 
-def _combat_top(
-    headline: str,
-    boards: CombatBoards,
-    status_info: MatchStatus | None,
+def _combat_info_top(
+    headline: str, status_info: MatchStatus | None
 ) -> RenderableType:
-    own = own_board_renderable(boards.placement, boards.own_marks)
     if status_info is None:
-        return Group(Text(headline), Text(""), own)
-    info = Group(
+        return Text(headline)
+    return Group(
         Text(headline),
         Text.from_markup(connection_line(status_info)),
     )
-    side_by_side = Columns(
-        [own, Panel(scoreboard_renderable(status_info), title="scoreboard")],
-        padding=(0, 2),
-        expand=False,
+
+
+def _combat_boards(
+    boards: CombatBoards, *, aim: Coordinate | None = None
+) -> RenderableType:
+    """Own fleet stacked above tracking/Aim so the middle band stays tall enough."""
+    return Group(
+        own_board_renderable(boards.placement, boards.own_marks),
+        Text(""),
+        tracking_board_renderable(boards.tracking, boards.revealed, aim=aim),
     )
-    return Group(info, Text(""), side_by_side)
+
+
+def _combat_sidebar(
+    status_info: MatchStatus | None, controls: str
+) -> RenderableType:
+    controls_text = Text.from_markup(controls)
+    if status_info is None:
+        return controls_text
+    return Group(
+        sidebar_scoreboard_renderable(status_info),
+        Text(""),
+        controls_text,
+    )
 
 
 def combat_frame(
@@ -258,15 +289,15 @@ def combat_frame(
     status: str = "",
     status_info: MatchStatus | None = None,
 ) -> RenderableType:
-    """Your turn: opponent Board + Aim wide; own Board + scoreboard in the top strip."""
-    top = _combat_top(f"{role} · Aim · Match time {match_time}", boards, status_info)
+    """Your turn: own + Aim boards stacked; scoreboard + controls in the sidebar."""
     return _three_band(
-        top=top,
-        top_size=19 if status_info is not None else 16,
-        middle_left=tracking_board_renderable(
-            boards.tracking, boards.revealed, aim=aim
+        top=_combat_info_top(
+            f"{role} · Aim · Match time {match_time}", status_info
         ),
-        middle_right=Text.from_markup(AIM_CONTROLS),
+        top_size=4 if status_info is not None else 3,
+        middle_left=_combat_boards(boards, aim=aim),
+        middle_right=_combat_sidebar(status_info, AIM_CONTROLS),
+        right_size=32,
         bottom=Text(status or " "),
     )
 
@@ -280,16 +311,16 @@ def combat_wait_frame(
     status: str = "Waiting for opponent…",
     status_info: MatchStatus | None = None,
 ) -> RenderableType:
-    """Opponent's turn: Aim board wide, own Board + scoreboard in the top strip."""
+    """Opponent's turn: same board stack; wait controls in the sidebar."""
     spin = _SPINNER[spinner_frame % len(_SPINNER)]
-    top = _combat_top(
-        f"{role} · Waiting · Match time {match_time}", boards, status_info
-    )
     status_line = f"{spin} {status}" if status else spin
     return _three_band(
-        top=top,
-        top_size=19 if status_info is not None else 16,
-        middle_left=tracking_board_renderable(boards.tracking, boards.revealed),
-        middle_right=Text.from_markup(WAIT_CONTROLS),
+        top=_combat_info_top(
+            f"{role} · Waiting · Match time {match_time}", status_info
+        ),
+        top_size=4 if status_info is not None else 3,
+        middle_left=_combat_boards(boards),
+        middle_right=_combat_sidebar(status_info, WAIT_CONTROLS),
+        right_size=32,
         bottom=Text(status_line),
     )

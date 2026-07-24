@@ -34,7 +34,7 @@ def _boards(
 
 
 def _export(frame: object) -> str:
-    console = Console(record=True, width=100, height=28, force_terminal=True)
+    console = Console(record=True, width=80, height=24, force_terminal=True)
     console.print(frame)  # type: ignore[arg-type]
     return console.export_text()
 
@@ -61,6 +61,7 @@ def test_combat_frame_opponent_wide_own_compact_aim_controls() -> None:
     lower = text.lower()
     assert "fire" in lower
     assert "w/a/s/d" in lower or "wasd" in lower or "move" in lower
+    assert "quit" in lower
     assert "lock" not in lower
 
 

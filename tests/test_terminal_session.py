@@ -206,7 +206,7 @@ async def test_guest_ui_reports_abandoned_when_host_disconnects() -> None:
 
 async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
     """q during wait-for-commitment closes the connection → Abandoned."""
-    host_io = ScriptedIO(inputs=deque(), keys=ScriptedKeySource(["y", "q"]))
+    host_io = ScriptedIO(inputs=deque(), keys=ScriptedKeySource(["y", "q", "q"]))
 
     async with start_relay(grace_seconds=0.05) as relay_url:
         invite_holder: list[str] = []
@@ -249,7 +249,7 @@ async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
 async def test_host_quit_during_aim_abandons_for_guest() -> None:
     """q during Aim (combat) closes the connection → Abandoned."""
     # Spacer key so wait_honoring_quit does not consume ``q`` before Aim.
-    host_io = ScriptedIO(inputs=deque(), keys=ScriptedKeySource(["y", "1", "q"]))
+    host_io = ScriptedIO(inputs=deque(), keys=ScriptedKeySource(["y", "1", "q", "q"]))
 
     async with start_relay(grace_seconds=0.05) as relay_url:
         invite_holder: list[str] = []

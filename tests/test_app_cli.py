@@ -77,3 +77,36 @@ def test_run_relay_invokes_run_relay(monkeypatch: pytest.MonkeyPatch) -> None:
     app._run_relay(args)  # pyright: ignore[reportPrivateUsage]
 
     assert captured == {"bind_host": "0.0.0.0", "port": 9001, "grace_seconds": 5.0}
+
+
+def test_main_keyboard_interrupt_exits_quietly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def boom(_: argparse.Namespace) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(app, "_run_host", boom)
+    app.main(["host"])
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    assert "Interrupted" in captured.out
+
+
+def test_run_relay_keyboard_interrupt_stops_quietly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def boom(*_a: object, **_k: object) -> object:
+        raise KeyboardInterrupt
+
+    def fake_configure(**_: object) -> None:
+        return None
+
+    monkeypatch.setattr(app, "run_relay", boom)
+    monkeypatch.setattr(app, "configure_logging", fake_configure)
+
+    args = argparse.Namespace(bind_host="127.0.0.1", port=8765, grace_seconds=30.0)
+    app._run_relay(args)  # pyright: ignore[reportPrivateUsage]
+    out = capsys.readouterr().out
+    assert "Relay stopped" in out
+    assert "Traceback" not in out

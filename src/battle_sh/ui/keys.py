@@ -140,7 +140,11 @@ class TerminalKeySource:
     """Production KeySource: reads raw terminal keys via readchar."""
 
     def read(self) -> Key:
-        raw = readchar.readkey()
+        try:
+            raw = readchar.readkey()
+        except KeyboardInterrupt:
+            # readchar raises on Ctrl+C; map into the KeySource quit path.
+            return INTERRUPT
         name = _RAW_TO_NAME.get(raw)
         if name is not None:
             return Key(name)

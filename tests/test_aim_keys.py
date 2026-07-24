@@ -64,3 +64,11 @@ def test_aim_resumes_from_last_shot() -> None:
 def test_q_raises_quit_requested() -> None:
     with pytest.raises(QuitRequested):
         run_aim(ScriptedKeySource(["q"]), fired=frozenset())
+
+
+def test_q_with_clock_requires_confirm() -> None:
+    from battle_sh.ui.clock import FakeClock
+
+    clock = FakeClock()
+    with pytest.raises(QuitRequested):
+        run_aim(ScriptedKeySource(["q", "q"]), fired=frozenset(), clock=clock)

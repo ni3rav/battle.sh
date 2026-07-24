@@ -18,7 +18,7 @@ from battle_sh.rules.placement import (
 from battle_sh.ui.async_input import read_key_off_loop
 from battle_sh.ui.clock import Clock
 from battle_sh.ui.keys import MOVE_DELTA, Key, KeySource, key_token
-from battle_sh.ui.quit_arm import CTRL_C_WARN, QuitArm
+from battle_sh.ui.quit_arm import QUIT_WARN, QuitArm
 from battle_sh.ui.shell import placement_frame
 from rich.console import Console
 from rich.live import Live
@@ -47,12 +47,10 @@ def _apply_placement_key(
     an optional status ``message`` to emit.
     """
     token = key_token(key)
-    if token == "q":
-        return placement, selected, "quit", None
-    if key.is_interrupt:
+    if token == "q" or key.is_interrupt:
         if arm is None or arm.handle_interrupt() == "confirm":
             return placement, selected, "quit", None
-        return placement, selected, "continue", CTRL_C_WARN
+        return placement, selected, "continue", QUIT_WARN
     if token == "y":
         validate_placement(placement)
         return placement, selected, "lock", None
