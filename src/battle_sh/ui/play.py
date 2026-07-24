@@ -16,15 +16,16 @@ from battle_sh.networking.connection import (
     NotYourTurnError,
     RevealVerificationError,
     ShotReport,
+    close_code_and_reason,
 )
 from battle_sh.networking.protocol import MatchOutcome
 from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import Coordinate, Placement
-from battle_sh.ui.aim_flow import run_aim
+from battle_sh.ui.aim_flow import run_aim_async
 from battle_sh.ui.boards import own_board_renderable
 from battle_sh.ui.clock import Clock, FakeClock, SystemClock, format_elapsed
 from battle_sh.ui.keys import KeySource, ScriptedKeySource, TerminalKeySource
-from battle_sh.ui.placement_flow import QuitRequested, run_placement
+from battle_sh.ui.placement_flow import QuitRequested, run_placement_async
 from battle_sh.ui.shell import (
     CombatBoards,
     combat_frame,
@@ -38,6 +39,15 @@ from rich.live import Live
 from websockets.exceptions import ConnectionClosed
 
 T = TypeVar("T")
+
+
+def _connection_lost_message(exc: ConnectionClosed) -> str:
+    _code, reason = close_code_and_reason(exc)
+    if "keepalive" in reason.lower():
+        return (
+            "Connection lost (keepalive timeout). Match Abandoned. Exiting."
+        )
+    return f"Connection lost: {exc}. Match Abandoned. Exiting."
 
 
 @dataclass
@@ -90,7 +100,11 @@ async def run_host(
     grace_seconds: float = 30.0,
 ) -> None:
     io.print(f"Connecting to Relay {relay_url} as Host…")
-    conn = await MatchConnection.connect(relay_url, grace_seconds=grace_seconds)
+    try:
+        conn = await MatchConnection.connect(relay_url, grace_seconds=grace_seconds)
+    except OSError as exc:
+        io.print(f"Could not connect to Relay {relay_url}: {exc}")
+        return
     try:
         invite = await conn.create_match()
         if on_invite is not None:
@@ -110,7 +124,7 @@ async def run_host(
         match_started_at = io.clock.now()
         io.print("Guest joined.")
 
-        placement = _run_placement_with_match_time(
+        placement = await _run_placement_with_match_time(
             io,
             role="Host",
             match_started_at=match_started_at,
@@ -126,6 +140,10 @@ async def run_host(
         await _play_match(conn, placement, io, role="Host", match_started_at=match_started_at)
     except QuitRequested:
         io.print("Quitting. Match Abandoned for your opponent.")
+    except ConnectionClosed as exc:
+        io.print(_connection_lost_message(exc))
+    except MatchConnectionError as exc:
+        io.print(f"Match error: {exc.message}. Exiting.")
     finally:
         await conn.close()
 
@@ -139,13 +157,17 @@ async def run_guest(
     grace_seconds: float = 30.0,
 ) -> None:
     io.print(f"Connecting to Relay {relay_url} as Guest…")
-    conn = await MatchConnection.connect(relay_url, grace_seconds=grace_seconds)
+    try:
+        conn = await MatchConnection.connect(relay_url, grace_seconds=grace_seconds)
+    except OSError as exc:
+        io.print(f"Could not connect to Relay {relay_url}: {exc}")
+        return
     try:
         await conn.join_match(invite)
         match_started_at = io.clock.now()
         io.print(f"Joined Match with Invite {invite}.")
 
-        placement = _run_placement_with_match_time(
+        placement = await _run_placement_with_match_time(
             io,
             role="Guest",
             match_started_at=match_started_at,
@@ -159,6 +181,10 @@ async def run_guest(
         await _play_match(conn, placement, io, role="Guest", match_started_at=match_started_at)
     except QuitRequested:
         io.print("Quitting. Match Abandoned for your opponent.")
+    except ConnectionClosed as exc:
+        io.print(_connection_lost_message(exc))
+    except MatchConnectionError as exc:
+        io.print(f"Match error: {exc.message}. Exiting.")
     finally:
         await conn.close()
 
@@ -185,7 +211,7 @@ async def _wait_for_opponent_commitment(
     )
 
 
-def _run_placement_with_match_time(
+async def _run_placement_with_match_time(
     io: LiveIO | ScriptedIO,
     *,
     role: str,
@@ -196,7 +222,9 @@ def _run_placement_with_match_time(
         elapsed = format_elapsed(io.clock.now() - match_started_at)
         return f"{role} · Placement · Match time {elapsed}"
 
-    return run_placement(
+    # Read keys off the event loop so the WebSocket keepalive keeps answering
+    # pings while the Player arranges ships (rendering stays on the loop thread).
+    return await run_placement_async(
         io.keys,
         console=io.console,
         placement_factory=placement_factory,
@@ -358,7 +386,9 @@ async def _take_shot_until_legal(
         )
 
     while True:
-        aim = run_aim(
+        # Read keys off the event loop so the WebSocket keepalive keeps answering
+        # pings while the Player takes aim (rendering stays on the loop thread).
+        aim = await run_aim_async(
             io.keys,
             fired=fired,
             start=last_shot,

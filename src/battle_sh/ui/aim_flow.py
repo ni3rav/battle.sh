@@ -3,16 +3,48 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Literal
 
 from battle_sh.rules.placement import COLUMNS, ROWS, Coordinate, coordinate
+from battle_sh.ui.async_input import read_key_off_loop
 from battle_sh.ui.clock import Clock
-from battle_sh.ui.keys import MOVE_DELTA, KeySource, key_token
+from battle_sh.ui.keys import MOVE_DELTA, Key, KeySource, key_token
 from battle_sh.ui.placement_flow import QuitRequested
 from battle_sh.ui.quit_arm import CTRL_C_WARN, QuitArm
 from rich.console import Console
 from rich.live import Live
 
 _FIRE_KEYS = frozenset({"f", "enter", "space"})
+
+_AimAction = Literal["continue", "fire", "quit"]
+
+
+def _apply_aim_key(
+    key: Key,
+    aim: Coordinate,
+    status: str,
+    *,
+    fired: frozenset[Coordinate],
+    arm: QuitArm | None,
+) -> tuple[Coordinate, str, _AimAction]:
+    """Pure per-key Aim transition shared by the sync and async drivers."""
+    token = key_token(key)
+    if token == "q":
+        return aim, status, "quit"
+    if key.is_interrupt:
+        if arm is None or arm.handle_interrupt() == "confirm":
+            return aim, status, "quit"
+        return aim, CTRL_C_WARN, "continue"
+    if token in _FIRE_KEYS:
+        if aim in fired:
+            return aim, "Already fired there.", "continue"
+        return aim, status, "fire"
+    if token in MOVE_DELTA:
+        delta = MOVE_DELTA[token]
+        nxt = step_skipping_fired(aim, delta[0], delta[1], fired)
+        if nxt is not None:
+            return nxt, status, "continue"
+    return aim, status, "continue"
 
 
 def run_aim(
@@ -46,26 +78,13 @@ def run_aim(
             if live is not None and frame is not None:
                 live.update(frame(aim, status), refresh=True)  # type: ignore[arg-type]
             key = keys.read()
-            token = key_token(key)
-
-            if token == "q":
+            aim, status, action = _apply_aim_key(
+                key, aim, status, fired=fired, arm=arm
+            )
+            if action == "quit":
                 raise QuitRequested
-            if key.is_interrupt:
-                if arm is None or arm.handle_interrupt() == "confirm":
-                    raise QuitRequested
-                status = CTRL_C_WARN
-                continue
-            if token in _FIRE_KEYS:
-                if aim in fired:
-                    status = "Already fired there."
-                    continue
+            if action == "fire":
                 return aim
-            if token in MOVE_DELTA:
-                delta = MOVE_DELTA[token]
-                nxt = step_skipping_fired(aim, delta[0], delta[1], fired)
-                if nxt is not None:
-                    aim = nxt
-                continue
 
     if console is None or frame is None:
         return loop(None)
@@ -79,6 +98,64 @@ def run_aim(
         get_renderable=lambda: frame(aim, status),  # type: ignore[arg-type, return-value]
     ) as live:
         return loop(live)
+
+
+async def run_aim_async(
+    keys: KeySource,
+    *,
+    fired: frozenset[Coordinate],
+    start: Coordinate | None = None,
+    on_cursor: Callable[[Coordinate], None] | None = None,
+    clock: Clock | None = None,
+    console: Console | None = None,
+    frame: Callable[[Coordinate, str], object] | None = None,
+) -> Coordinate:
+    """Async Aim: reads keys off the event loop so keepalive stays responsive.
+
+    Behaves like :func:`run_aim` but never blocks the loop while awaiting a key;
+    all rendering stays on the loop thread.
+    """
+    aim = initial_aim(start, fired)
+    arm = QuitArm(clock) if clock is not None else None
+    status = ""
+
+    render: Callable[[], object] | None = None
+    if frame is not None:
+        frame_fn = frame
+        render = lambda: frame_fn(aim, status)  # noqa: E731
+
+    async def loop(live: Live | None) -> Coordinate:
+        nonlocal aim, status
+        tick = clock is not None
+        while True:
+            if arm is not None:
+                arm.expire_if_due()
+            if on_cursor is not None:
+                on_cursor(aim)
+            if live is not None and render is not None:
+                live.update(render(), refresh=True)  # type: ignore[arg-type]
+            key = await read_key_off_loop(
+                keys,
+                live=live if tick else None,
+                render=render if tick else None,
+            )
+            aim, status, action = _apply_aim_key(
+                key, aim, status, fired=fired, arm=arm
+            )
+            if action == "quit":
+                raise QuitRequested
+            if action == "fire":
+                return aim
+
+    if console is None or frame is None:
+        return await loop(None)
+
+    with Live(
+        console=console,
+        auto_refresh=False,
+        transient=False,
+    ) as live:
+        return await loop(live)
 
 
 def initial_aim(

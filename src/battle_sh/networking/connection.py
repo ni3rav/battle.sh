@@ -6,10 +6,13 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Self, cast
 
+import structlog
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
 from battle_sh.networking.protocol import (
+    KEEPALIVE_PING_INTERVAL,
+    KEEPALIVE_PING_TIMEOUT,
     ErrorCode,
     MatchOutcome,
     MsgType,
@@ -18,6 +21,7 @@ from battle_sh.networking.protocol import (
     encode,
     error_message,
 )
+from battle_sh.observability import get_logger, new_conn_id
 from battle_sh.rules.board import (
     Board,
     DuplicateShotError,
@@ -42,6 +46,14 @@ class MatchConnectionError(Exception):
         self.code = code
         self.message = message
         super().__init__(f"{code}: {message}")
+
+
+def close_code_and_reason(exc: ConnectionClosed) -> tuple[int | None, str]:
+    """Extract the close code/reason without the deprecated ``.code`` accessor."""
+    close = exc.rcvd or exc.sent
+    if close is None:
+        return None, ""
+    return close.code, close.reason or ""
 
 
 class NotReadyToFireError(Exception):
@@ -81,11 +93,26 @@ class MatchConnection:
     _outgoing: set[Coordinate] = field(default_factory=set[Coordinate])
     _opponent_answers: list[ShotAnswer] = field(default_factory=list[ShotAnswer])
     _match_end: MatchEnd | None = None
+    _conn_id: str = field(default_factory=new_conn_id)
 
     @classmethod
     async def connect(cls, relay_url: str, *, grace_seconds: float = 30.0) -> Self:
-        ws = await connect(relay_url)
-        return cls(_ws=ws, _grace_seconds=grace_seconds)
+        ws = await connect(
+            relay_url,
+            ping_interval=KEEPALIVE_PING_INTERVAL,
+            ping_timeout=KEEPALIVE_PING_TIMEOUT,
+        )
+        conn = cls(_ws=ws, _grace_seconds=grace_seconds)
+        conn._log().info("relay_connected", relay_url=relay_url)
+        return conn
+
+    def _log(self) -> structlog.stdlib.BoundLogger:
+        return get_logger(
+            component="connection",
+            conn_id=self._conn_id,
+            role=self._role,
+            session_id=self._invite,
+        )
 
     @property
     def invite(self) -> str | None:
@@ -123,6 +150,7 @@ class MatchConnection:
             raise MatchConnectionError("unexpected", "Match created without Invite")
         self._invite = invite
         self._role = "host"
+        self._log().info("match_created")
         return invite
 
     async def join_match(self, invite: str) -> None:
@@ -130,6 +158,7 @@ class MatchConnection:
         await self._expect(MsgType.MATCH_JOINED)
         self._invite = invite
         self._role = "guest"
+        self._log().info("match_joined")
 
     async def reconnect_match(self, invite: str, role: Role) -> None:
         await self._send(
@@ -138,6 +167,7 @@ class MatchConnection:
         await self._expect(MsgType.MATCH_RESUMED)
         self._invite = invite
         self._role = role
+        self._log().info("match_reconnected")
 
     async def wait_for_player_joined(self) -> None:
         await self._expect(MsgType.PLAYER_JOINED)
@@ -151,6 +181,7 @@ class MatchConnection:
             {"type": MsgType.PLACEMENT_COMMITMENT, "commitment": commitment}
         )
         self._arm_turns_if_ready()
+        self._log().info("placement_locked", commitment=commitment)
         return commitment
 
     async def wait_for_opponent_commitment(self) -> str:
@@ -207,6 +238,14 @@ class MatchConnection:
 
         self._my_turn = False
 
+        self._log().info(
+            "shot_fired",
+            coordinate=str(coord),
+            result=answer.result,
+            ship=answer.ship,
+            match_end=match_end.outcome if match_end is not None else None,
+        )
+
         return ShotReport(
             result=answer.result,
             coordinate=str(coord),
@@ -227,6 +266,9 @@ class MatchConnection:
         if shot_msg.get("type") == MsgType.MATCH_END:
             end = self._parse_match_end(shot_msg)
             self._match_end = end
+            self._log().info(
+                "match_end_received", outcome=end.outcome, winner=end.winner
+            )
             return ShotReport(
                 result="miss",
                 coordinate="",
@@ -309,6 +351,14 @@ class MatchConnection:
         if match_end is None:
             self._my_turn = True
 
+        self._log().info(
+            "shot_answered",
+            coordinate=str(coord),
+            result=answer.result,
+            ship=answer.ship,
+            match_end=match_end.outcome if match_end is not None else None,
+        )
+
         return ShotReport(
             result=answer.result,
             coordinate=str(coord),
@@ -324,7 +374,14 @@ class MatchConnection:
             return self._match_end
         try:
             reply = await self._expect(MsgType.MATCH_END)
-        except ConnectionClosed:
+        except ConnectionClosed as exc:
+            code, reason = close_code_and_reason(exc)
+            self._log().warning(
+                "connection_lost_waiting_for_end",
+                close_code=code,
+                close_reason=reason,
+                grace_seconds=self._grace_seconds,
+            )
             await asyncio.sleep(self._grace_seconds)
             end = MatchEnd(outcome=MatchOutcome.ABANDONED)
             self._match_end = end
@@ -334,6 +391,7 @@ class MatchConnection:
         return end
 
     async def close(self) -> None:
+        self._log().info("connection_closing")
         await self._ws.close()
 
     def _parse_shot_result(
@@ -446,4 +504,5 @@ __all__ = [
     "NotYourTurnError",
     "RevealVerificationError",
     "ShotReport",
+    "close_code_and_reason",
 ]
