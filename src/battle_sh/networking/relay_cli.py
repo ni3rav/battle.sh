@@ -6,6 +6,7 @@ import argparse
 import asyncio
 
 from battle_sh.networking.relay import run_relay
+from battle_sh.observability import configure_logging
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -23,6 +24,8 @@ def main(argv: list[str] | None = None) -> None:
         help="Reconnect grace window in seconds",
     )
     args = parser.parse_args(argv)
+    # Relay logs to stderr so systemd / a terminal captures structured records.
+    configure_logging(component="relay")
     asyncio.run(
         run_relay(args.bind_host, args.port, grace_seconds=args.grace_seconds)
     )
