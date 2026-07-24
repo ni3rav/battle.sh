@@ -22,7 +22,8 @@ def _fixed_placement() -> Placement:
 
 
 def _export(frame: object) -> str:
-    console = Console(record=True, width=100, height=28, force_terminal=True)
+    # Tall enough for stacked key → action rows with blank lines between.
+    console = Console(record=True, width=100, height=40, force_terminal=True)
     console.print(frame)  # type: ignore[arg-type]
     return console.export_text()
 
@@ -40,15 +41,30 @@ def test_placement_frame_has_three_bands_with_board_and_controls() -> None:
     assert "Your fleet" in text
     assert "D" in text  # Destroyer glyph on board
     assert "Can't move there." in text
-    # Placement-phase keys only (not fire / aim)
-    assert "y" in text.lower() and "lock" in text.lower()
-    assert "t" in text.lower() and "random" in text.lower()
-    assert "w/a/s/d" in text.lower() or "wasd" in text.lower()
-    assert "ctrl+c" in text.lower()
+    # Placement-phase keys only (not fire / aim); stacked key → action rows.
+    assert "Placement" in text
+    assert "→ select ship" in text
+    assert "→ cycle" in text
+    assert "→ move" in text
+    assert "→ flip H↔V" in text or "→ flip" in text
+    assert "→ new random" in text
+    assert "→ lock" in text
     assert "→ quit" in text
+    assert "`1`" in text and "`5`" in text
+    assert "`y`" in text
+    assert "`Ctrl+C`" in text or "`ctrl+c`" in text.lower()
     assert "fire" not in text.lower()
     assert "shoot" not in text.lower()
     assert "q /" not in text.lower() and "q/" not in text.lower()
+
+
+def test_placement_controls_markup_stacks_keys_with_blank_lines() -> None:
+    from battle_sh.ui.shell import PLACEMENT_CONTROLS
+
+    assert "→ select ship\n\n" in PLACEMENT_CONTROLS
+    assert "→ cycle\n\n" in PLACEMENT_CONTROLS
+    assert "[bold]`Ctrl+C`[/]" in PLACEMENT_CONTROLS
+    assert "`1`-`5`" in PLACEMENT_CONTROLS or "`1`–`5`" in PLACEMENT_CONTROLS
 
 
 def test_run_placement_with_console_keeps_keysource_behavior() -> None:

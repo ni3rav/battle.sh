@@ -245,7 +245,7 @@ async def test_host_quit_during_commitment_wait_abandons_for_guest() -> None:
             timeout=15,
         )
 
-    assert any("Quitting" in o or "Abandoned" in o for o in host_io.outputs)
+    assert any("Match Abandoned. Exiting." in o for o in host_io.outputs)
     assert guest_outcome == ["abandoned", "left"]
 
 
@@ -291,5 +291,74 @@ async def test_host_quit_during_aim_abandons_for_guest() -> None:
             timeout=15,
         )
 
-    assert any("Quitting" in o or "Abandoned" in o for o in host_io.outputs)
+    assert any("Match Abandoned. Exiting." in o for o in host_io.outputs)
     assert guest_outcome == ["abandoned"]
+
+
+class _HoldAfterKeys:
+    """Yield scripted keys, then block so Aim stays open for opponent leave."""
+
+    def __init__(self, keys: list[str]) -> None:
+        import threading
+
+        self._inner = ScriptedKeySource(keys)
+        self._gate = threading.Event()
+
+    def read(self):  # noqa: ANN201
+        try:
+            return self._inner.read()
+        except EOFError:
+            self._gate.wait()
+            raise
+
+    def try_read(self, timeout: float = 0.0):  # noqa: ANN201
+        return self._inner.try_read(timeout)
+
+    def release(self) -> None:
+        self._gate.set()
+
+
+async def test_guest_leave_while_host_aiming_abandons_host_immediately() -> None:
+    """Host Aim must observe MATCH_END without needing a fire key."""
+    hold = _HoldAfterKeys(["y"])
+    host_io = ScriptedIO(inputs=deque(), keys=hold)  # type: ignore[arg-type]
+
+    async with start_relay(grace_seconds=5.0) as relay_url:
+        invite_holder: list[str] = []
+
+        async def host_task() -> None:
+            try:
+                await run_host(
+                    relay_url,
+                    host_io,
+                    placement_factory=_placement_a,
+                    on_invite=lambda inv: invite_holder.append(inv),
+                    grace_seconds=5.0,
+                )
+            finally:
+                hold.release()
+
+        async def guest_task() -> None:
+            for _ in range(200):
+                if invite_holder:
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("Host never published Invite")
+            guest = await MatchConnection.connect(relay_url, grace_seconds=5.0)
+            try:
+                await guest.join_match(invite_holder[0])
+                await guest.lock_placement(_placement_b())
+                await guest.wait_for_opponent_commitment()
+                # Host fires first and is blocked in Aim; leave must wake them.
+                await asyncio.sleep(0.2)
+                await guest.leave_match()
+            finally:
+                await guest.close()
+
+        await asyncio.wait_for(
+            asyncio.gather(host_task(), guest_task()),
+            timeout=15,
+        )
+
+    assert any("Match Abandoned. Exiting." in o for o in host_io.outputs)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from battle_sh.rules.placement import (
@@ -172,11 +172,14 @@ async def run_placement_async(
     rng: random.Random | None = None,
     top_info: Callable[[], str] | None = None,
     clock: Clock | None = None,
+    async_on_tick: Callable[[], Awaitable[None]] | None = None,
+    tick_interval: float = 0.05,
 ) -> Placement:
     """Async Placement: reads keys off the event loop so keepalive stays alive.
 
     Behaves like :func:`run_placement` but never blocks the loop while awaiting a
-    key; all rendering stays on the loop thread.
+    key; all rendering stays on the loop thread. ``async_on_tick`` runs every
+    ``tick_interval`` so callers can poll the Relay for Match end.
     """
     factory = placement_factory or (lambda: random_placement(rng))
     placement = factory()
@@ -217,6 +220,7 @@ async def run_placement_async(
         return None
 
     async def loop(live: Live | None) -> Placement:
+        tick = top_info is not None or async_on_tick is not None
         while True:
             if arm is not None:
                 arm.expire_if_due()
@@ -224,8 +228,10 @@ async def run_placement_async(
                 live.update(frame(), refresh=True)
             key = await read_key_off_loop(
                 keys,
-                live=live if top_info is not None else None,
-                render=frame if top_info is not None else None,
+                live=live if tick else None,
+                render=frame if tick else None,
+                refresh_interval=tick_interval if tick else 1.0,
+                async_on_tick=async_on_tick,
             )
             locked = step(key)
             if locked is not None:

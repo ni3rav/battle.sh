@@ -16,29 +16,45 @@ from rich.text import Text
 PLACEMENT_CONTROLS = """\
 [bold]Placement[/]
 
-  [bold]1[/]-[bold]5[/]            select ship
-  [bold]tab[/] / [bold]shift+tab[/] cycle
-  [bold]w/a/s/d[/] / arrows move
-  [bold]e[/] / [bold]r[/]          flip H↔V
-  [bold]t[/]              new random
-  [bold]y[/]              lock
-  [bold]Ctrl+C[/]
+  [bold]`1`-`5`[/]
+  → select ship
+
+  [bold]`tab` / `shift+tab`[/]
+  → cycle
+
+  [bold]`w`/`a`/`s`/`d` / arrows[/]
+  → move
+
+  [bold]`e` / `r`[/]
+  → flip H↔V
+
+  [bold]`t`[/]
+  → new random
+
+  [bold]`y`[/]
+  → lock
+
+  [bold]`Ctrl+C`[/]
   → quit
 """
 
 AIM_CONTROLS = """\
 [bold]Aim[/]
 
-  [bold]w/a/s/d[/] / arrows move
-  [bold]f[/] / Enter / Space fire
-  [bold]Ctrl+C[/]
+  [bold]`w`/`a`/`s`/`d` / arrows[/]
+  → move
+
+  [bold]`f` / `Enter` / `Space`[/]
+  → fire
+
+  [bold]`Ctrl+C`[/]
   → quit
 """
 
 WAIT_CONTROLS = """\
 [bold]Waiting[/]
 
-  [bold]Ctrl+C[/]
+  [bold]`Ctrl+C`[/]
   → quit
 """
 
@@ -190,6 +206,7 @@ def placement_frame(
         top=Text(top_info),
         middle_left=board_body,
         middle_right=Text.from_markup(PLACEMENT_CONTROLS),
+        right_size=32,
         bottom=Text(status or " "),
     )
 
@@ -273,13 +290,14 @@ def _combat_boards(
 def _combat_sidebar(
     status_info: MatchStatus | None, controls: str
 ) -> RenderableType:
+    """Keymap first so stacked controls stay visible; scoreboard below."""
     controls_text = Text.from_markup(controls)
     if status_info is None:
         return controls_text
     return Group(
-        sidebar_scoreboard_renderable(status_info),
-        Text(""),
         controls_text,
+        Text(""),
+        sidebar_scoreboard_renderable(status_info),
     )
 
 

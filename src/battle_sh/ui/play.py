@@ -240,6 +240,7 @@ async def run_host(
                 role="Host",
                 match_started_at=match_started_at,
                 placement_factory=placement_factory,
+                conn=conn,
             )
             await conn.lock_placement(placement)
 
@@ -253,10 +254,10 @@ async def run_host(
             )
     except QuitRequested:
         await _leave_on_quit(conn)
-        io.print("Quitting. Match Abandoned for your opponent.")
+        io.print("Match Abandoned. Exiting.")
     except KeyboardInterrupt:
         await _leave_on_quit(conn)
-        io.print("Quitting. Match Abandoned for your opponent.")
+        io.print("Match Abandoned. Exiting.")
     except asyncio.CancelledError:
         # Platforms without add_signal_handler (or a stray cancel) still must
         # leave so the opponent skips reconnect grace.
@@ -298,6 +299,7 @@ async def run_guest(
                 role="Guest",
                 match_started_at=match_started_at,
                 placement_factory=placement_factory,
+                conn=conn,
             )
             await conn.lock_placement(placement)
 
@@ -311,10 +313,10 @@ async def run_guest(
             )
     except QuitRequested:
         await _leave_on_quit(conn)
-        io.print("Quitting. Match Abandoned for your opponent.")
+        io.print("Match Abandoned. Exiting.")
     except KeyboardInterrupt:
         await _leave_on_quit(conn)
-        io.print("Quitting. Match Abandoned for your opponent.")
+        io.print("Match Abandoned. Exiting.")
     except asyncio.CancelledError:
         await _leave_on_quit(conn)
         raise
@@ -360,10 +362,18 @@ async def _run_placement_with_match_time(
     role: str,
     match_started_at: float,
     placement_factory: Callable[[], Placement] | None,
+    conn: MatchConnection,
 ) -> Placement:
     def top_info() -> str:
         elapsed = format_elapsed(io.clock.now() - match_started_at)
         return f"{role} · Placement · Match time {elapsed}"
+
+    async def watch_match_end() -> None:
+        end = await conn.poll_incoming(timeout=0.05)
+        if end is not None:
+            raise MatchConnectionError(
+                "match_ended", "Match ended during Placement"
+            )
 
     # Read keys off the event loop so the WebSocket keepalive keeps answering
     # pings while the Player arranges ships (rendering stays on the loop thread).
@@ -373,6 +383,7 @@ async def _run_placement_with_match_time(
         placement_factory=placement_factory,
         top_info=top_info,
         clock=io.clock,
+        async_on_tick=watch_match_end,
     )
 
 
@@ -492,6 +503,9 @@ async def _play_match(
                     status_info=match_status(),
                     initial_status=status_message or "Your turn — Aim and fire.",
                 )
+                if report.match_end is not None:
+                    freeze_match_time()
+                    break
                 last_shot = parse_coordinate(report.coordinate)
                 _apply_outgoing(report, tracking, revealed)
                 if report.result == "sunk" and report.ship:
@@ -499,9 +513,6 @@ async def _play_match(
                 if report.verification_ok is not None:
                     verification_ok = report.verification_ok
                 status_message = _format_shot_feedback(report, outgoing=True)
-                if report.match_end is not None:
-                    freeze_match_time()
-                    break
             else:
                 wait_status = status_message or "Waiting for opponent…"
                 report = await _live_wait(
@@ -569,17 +580,37 @@ async def _take_shot_until_legal(
             status_info=status_info,
         )
 
+    async def watch_match_end() -> None:
+        end = await conn.poll_incoming(timeout=0.05)
+        if end is not None:
+            raise MatchConnectionError(
+                "match_ended", "Match ended while Aiming"
+            )
+
     while True:
         # Read keys off the event loop so the WebSocket keepalive keeps answering
         # pings while the Player takes aim (rendering stays on the loop thread).
-        aim = await run_aim_async(
-            io.keys,
-            fired=fired,
-            start=last_shot,
-            clock=io.clock,
-            console=io.console,
-            frame=frame,
-        )
+        # poll_incoming on each tick so opponent leave Abandons without waiting
+        # for a fire key.
+        try:
+            aim = await run_aim_async(
+                io.keys,
+                fired=fired,
+                start=last_shot,
+                clock=io.clock,
+                console=io.console,
+                frame=frame,
+                async_on_tick=watch_match_end,
+            )
+        except MatchConnectionError:
+            end = conn.match_end
+            if end is None:
+                raise
+            return ShotReport(
+                result="miss",
+                coordinate="",
+                match_end=end,
+            )
         try:
             return await conn.fire_shot(str(aim))
         except (IllegalShotError, DuplicateShotError, NotYourTurnError) as exc:
@@ -638,10 +669,7 @@ def _announce_end(
     match_time: str,
 ) -> None:
     if end.outcome == MatchOutcome.ABANDONED:
-        if end.reason == "left":
-            io.print("Opponent left the Match.")
-        else:
-            io.print("Match Abandoned (no Winner).")
+        io.print("Match Abandoned. Exiting.")
     elif end.outcome == MatchOutcome.WINNER:
         if end.winner == role:
             io.print("You win!")
@@ -654,4 +682,5 @@ def _announce_end(
         io.print("Commitment verification: FAILED.")
     else:
         io.print("Commitment verification: not applicable on this side.")
-    io.print("Exiting.")
+    if end.outcome != MatchOutcome.ABANDONED:
+        io.print("Exiting.")

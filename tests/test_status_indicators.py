@@ -27,7 +27,7 @@ def _placement() -> Placement:
     )
 
 
-def _export(frame: object, *, width: int = 80, height: int = 24) -> str:
+def _export(frame: object, *, width: int = 80, height: int = 36) -> str:
     console = Console(record=True, width=width, height=height, force_terminal=True)
     console.print(frame)  # type: ignore[arg-type]
     return console.export_text()

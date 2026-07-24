@@ -52,7 +52,7 @@ def test_quit_arm_expires_after_window() -> None:
 
 
 def _export(frame: object) -> str:
-    console = Console(record=True, width=100, height=24, force_terminal=True)
+    console = Console(record=True, width=100, height=36, force_terminal=True)
     console.print(frame)  # type: ignore[arg-type]
     return console.export_text()
 

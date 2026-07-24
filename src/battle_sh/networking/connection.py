@@ -222,7 +222,7 @@ class MatchConnection:
         await self._expect(MsgType.PLAYER_JOINED)
 
     async def leave_match(self) -> None:
-        """Signal intentional quit so the Relay Abandons immediately for the opponent."""
+        """Signal intentional quit so the Relay Abandons the Match immediately."""
         await self._send({"type": MsgType.LEAVE_MATCH})
         self._log().info("match_leave_sent")
 
@@ -477,6 +477,39 @@ class MatchConnection:
         end = self._parse_match_end(reply)
         self._match_end = end
         return end
+
+    async def poll_incoming(self, timeout: float = 0.0) -> MatchEnd | None:
+        """Non-blocking peek: apply control msgs; return MATCH_END if present.
+
+        Other application messages are queued on the inbox for the next
+        ``_recv`` / ``_expect``. Used while Aim/Placement hold the event loop
+        so an opponent ``leave_match`` Abandon is observed without firing.
+        """
+        if self._match_end is not None:
+            return self._match_end
+        for index, head in enumerate(self._inbox):
+            if head.get("type") == MsgType.MATCH_END:
+                del self._inbox[index]
+                end = self._parse_match_end(head)
+                self._match_end = end
+                return end
+        try:
+            message = await asyncio.wait_for(self._read_wire(), timeout=timeout)
+        except TimeoutError:
+            return None
+        except ConnectionClosed:
+            return None
+        if self._handle_opponent_control(message):
+            return None
+        if message.get("type") == MsgType.MATCH_END:
+            end = self._parse_match_end(message)
+            self._match_end = end
+            self._log().info(
+                "match_end_received", outcome=end.outcome, winner=end.winner
+            )
+            return end
+        self._inbox.append(message)
+        return None
 
     async def close(self) -> None:
         self._log().info("connection_closing")

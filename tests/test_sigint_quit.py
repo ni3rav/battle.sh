@@ -55,3 +55,35 @@ async def test_leave_on_quit_sends_leave_match() -> None:
     conn.leave_match = AsyncMock()
     await play_mod._leave_on_quit(conn)  # pyright: ignore[reportPrivateUsage]
     conn.leave_match.assert_awaited_once()
+
+
+def test_announce_end_abandoned_uses_shared_exit_copy() -> None:
+    from collections import deque
+
+    from battle_sh.networking.connection import MatchEnd
+    from battle_sh.networking.protocol import MatchOutcome
+    from battle_sh.ui.play import ScriptedIO
+
+    io = ScriptedIO(inputs=deque())
+    end = MatchEnd(outcome=MatchOutcome.ABANDONED, reason="left")
+    play_mod._announce_end(  # pyright: ignore[reportPrivateUsage]
+        io, end, verification_ok=None, role="host", match_time="0:42"
+    )
+    assert io.outputs[0] == "Match Abandoned. Exiting."
+    assert "Match time 0:42" in io.outputs
+    assert "Exiting." not in io.outputs  # already in the abandon line
+
+
+def test_announce_end_abandoned_without_reason_same_copy() -> None:
+    from collections import deque
+
+    from battle_sh.networking.connection import MatchEnd
+    from battle_sh.networking.protocol import MatchOutcome
+    from battle_sh.ui.play import ScriptedIO
+
+    io = ScriptedIO(inputs=deque())
+    end = MatchEnd(outcome=MatchOutcome.ABANDONED)
+    play_mod._announce_end(  # pyright: ignore[reportPrivateUsage]
+        io, end, verification_ok=None, role="guest", match_time="1:00"
+    )
+    assert io.outputs[0] == "Match Abandoned. Exiting."

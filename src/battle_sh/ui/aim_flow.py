@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from battle_sh.rules.placement import COLUMNS, ROWS, Coordinate, coordinate
@@ -107,11 +107,14 @@ async def run_aim_async(
     clock: Clock | None = None,
     console: Console | None = None,
     frame: Callable[[Coordinate, str], object] | None = None,
+    async_on_tick: Callable[[], Awaitable[None]] | None = None,
+    tick_interval: float = 0.05,
 ) -> Coordinate:
     """Async Aim: reads keys off the event loop so keepalive stays responsive.
 
     Behaves like :func:`run_aim` but never blocks the loop while awaiting a key;
-    all rendering stays on the loop thread.
+    all rendering stays on the loop thread. ``async_on_tick`` runs every
+    ``tick_interval`` so callers can poll the Relay for Match end.
     """
     aim = initial_aim(start, fired)
     arm = QuitArm(clock) if clock is not None else None
@@ -124,7 +127,7 @@ async def run_aim_async(
 
     async def loop(live: Live | None) -> Coordinate:
         nonlocal aim, status
-        tick = clock is not None
+        tick = clock is not None or async_on_tick is not None
         while True:
             if arm is not None:
                 arm.expire_if_due()
@@ -136,6 +139,8 @@ async def run_aim_async(
                 keys,
                 live=live if tick else None,
                 render=render if tick else None,
+                refresh_interval=tick_interval if tick else 1.0,
+                async_on_tick=async_on_tick,
             )
             aim, status, action = _apply_aim_key(
                 key, aim, status, fired=fired, arm=arm
