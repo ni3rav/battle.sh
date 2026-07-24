@@ -19,6 +19,7 @@ import logging.handlers
 import os
 import queue
 import sys
+import tempfile
 import uuid
 from typing import Any, TextIO
 
@@ -148,6 +149,15 @@ def configure_logging(
     _configured = True
 
     return get_logger(component=component)
+
+
+def configure_client_logging(role: str) -> None:
+    """Route client logs to a file so they never corrupt the terminal UI."""
+    log_file = os.environ.get("BATTLE_SH_LOG_FILE")
+    if not log_file:
+        log_dir = os.path.join(tempfile.gettempdir(), "battle-sh")
+        log_file = os.path.join(log_dir, f"{role}-{os.getpid()}.log")
+    configure_logging(component=f"client-{role}", log_file=log_file)
 
 
 def shutdown_logging() -> None:
