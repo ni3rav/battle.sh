@@ -32,20 +32,13 @@ def test_banner_matches_issue_glyph_layout() -> None:
 
 
 @pytest.mark.asyncio
-async def test_opening_menu_host_join_exit_via_keys() -> None:
+async def test_opening_menu_exit_via_keys() -> None:
+    """Opening lists Host / Join / Exit; Exit leaves. Host/Join covered in test_lobby."""
     app = _app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        # Host (default highlight)
-        await pilot.press("enter")
-        await pilot.pause()
-        assert app.is_running
-        # Join
-        await pilot.press("down", "enter")
-        await pilot.pause()
-        assert app.is_running
-        # Exit
-        await pilot.press("down", "enter")
+        # Skip Host and Join (they navigate away); Exit is third.
+        await pilot.press("down", "down", "enter")
         await pilot.pause()
     assert not app.is_running
 
