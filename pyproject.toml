@@ -21,6 +21,7 @@ dependencies = [
     "readchar>=4.2.2",
     "rich>=15.0.0",
     "structlog>=26.1.0",
+    "textual>=6.0.0",
     "websockets>=16.1.1",
 ]
 

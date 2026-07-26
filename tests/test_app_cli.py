@@ -1,4 +1,4 @@
-"""Unified `battle-sh` CLI: host / join / relay dispatch and defaults."""
+"""Unified `battle-sh` CLI: menu-first player app + relay dispatch and defaults."""
 
 from __future__ import annotations
 
@@ -8,34 +8,45 @@ from typing import Any
 import pytest
 
 from battle_sh import app
+from battle_sh.networking.protocol import DEFAULT_GRACE_SECONDS
 
 
-def test_parser_exposes_exactly_host_join_relay() -> None:
+def test_parser_launches_player_with_no_subcommand() -> None:
+    args = app.build_parser().parse_args([])
+    assert args.command is None
+    assert args.relay == "ws://127.0.0.1:8765"
+    assert args.grace_seconds == DEFAULT_GRACE_SECONDS
+
+
+def test_host_and_join_subcommands_are_gone() -> None:
     parser = app.build_parser()
-    for command in ("host", "join", "relay"):
-        args = parser.parse_args([command])
-        assert args.command == command
-
-
-def test_missing_command_errors() -> None:
     with pytest.raises(SystemExit):
-        app.build_parser().parse_args([])
+        parser.parse_args(["host"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["join", "--invite", "alpha-bravo-charlie-delta"])
 
 
-def test_relay_defaults() -> None:
+def test_relay_subcommand_still_available() -> None:
     args = app.build_parser().parse_args(["relay"])
+    assert args.command == "relay"
     assert args.bind_host == "127.0.0.1"
     assert args.port == 8765
-    assert args.grace_seconds == 10.0
+    assert args.grace_seconds == DEFAULT_GRACE_SECONDS
 
 
-def test_host_relay_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_player_relay_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BATTLE_SH_RELAY", "wss://relay.example.com")
-    args = app.build_parser().parse_args(["host"])
+    args = app.build_parser().parse_args([])
     assert args.relay == "wss://relay.example.com"
 
 
-def test_main_dispatches_to_each_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_player_relay_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BATTLE_SH_RELAY", "wss://relay.example.com")
+    args = app.build_parser().parse_args(["--relay", "ws://127.0.0.1:9999"])
+    assert args.relay == "ws://127.0.0.1:9999"
+
+
+def test_main_dispatches_player_and_relay(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
     def record(name: str) -> object:
@@ -44,15 +55,13 @@ def test_main_dispatches_to_each_handler(monkeypatch: pytest.MonkeyPatch) -> Non
 
         return handler
 
-    monkeypatch.setattr(app, "_run_host", record("host"))
-    monkeypatch.setattr(app, "_run_join", record("join"))
+    monkeypatch.setattr(app, "_run_player", record("player"))
     monkeypatch.setattr(app, "_run_relay", record("relay"))
 
-    app.main(["host"])
-    app.main(["join", "--invite", "alpha-bravo-charlie-delta"])
+    app.main([])
     app.main(["relay"])
 
-    assert calls == ["host", "join", "relay"]
+    assert calls == ["player", "relay"]
 
 
 def test_run_relay_invokes_run_relay(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,8 +94,8 @@ def test_main_keyboard_interrupt_exits_quietly(
     def boom(_: argparse.Namespace) -> None:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(app, "_run_host", boom)
-    app.main(["host"])
+    monkeypatch.setattr(app, "_run_player", boom)
+    app.main([])
     captured = capsys.readouterr()
     assert "Traceback" not in captured.err
     assert "Traceback" not in captured.out
