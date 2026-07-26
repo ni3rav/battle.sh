@@ -106,6 +106,9 @@ class MatchConnection:
     _inbox: deque[dict[str, Any]] = field(
         default_factory=lambda: deque[dict[str, Any]]()
     )
+    # Serialize WebSocket reads — concurrent poll_incoming/_recv can otherwise
+    # park a message in the inbox while the other awaits the wire forever.
+    _wire_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @classmethod
     async def connect(
@@ -487,29 +490,42 @@ class MatchConnection:
         """
         if self._match_end is not None:
             return self._match_end
-        for index, head in enumerate(self._inbox):
-            if head.get("type") == MsgType.MATCH_END:
-                del self._inbox[index]
-                end = self._parse_match_end(head)
-                self._match_end = end
-                return end
+        end = self._take_match_end_from_inbox()
+        if end is not None:
+            return end
+        # Inbox already holds app traffic for ``_recv`` — wait so watchers
+        # cannot busy-spin on an immediate ``None``.
+        if self._inbox:
+            await asyncio.sleep(timeout if timeout > 0 else 0.05)
+            return self._take_match_end_from_inbox()
         try:
-            message = await asyncio.wait_for(self._read_wire(), timeout=timeout)
+            async with self._wire_lock:
+                end = self._take_match_end_from_inbox()
+                if end is not None:
+                    return end
+                if self._inbox:
+                    return None
+                message = await asyncio.wait_for(
+                    self._read_wire(), timeout=timeout if timeout > 0 else 0.05
+                )
+                if self._handle_opponent_control(message):
+                    return None
+                if message.get("type") == MsgType.MATCH_END:
+                    end = self._parse_match_end(message)
+                    self._match_end = end
+                    self._log().info(
+                        "match_end_received",
+                        outcome=end.outcome,
+                        winner=end.winner,
+                    )
+                    return end
+                # Enqueue under the lock so ``_recv`` cannot miss it.
+                self._inbox.append(message)
+                return None
         except TimeoutError:
             return None
         except ConnectionClosed:
             return None
-        if self._handle_opponent_control(message):
-            return None
-        if message.get("type") == MsgType.MATCH_END:
-            end = self._parse_match_end(message)
-            self._match_end = end
-            self._log().info(
-                "match_end_received", outcome=end.outcome, winner=end.winner
-            )
-            return end
-        self._inbox.append(message)
-        return None
 
     async def close(self) -> None:
         self._log().info("connection_closing")
@@ -642,21 +658,36 @@ class MatchConnection:
         text = raw if isinstance(raw, str) else raw.decode()
         return decode(text)
 
+    def _take_match_end_from_inbox(self) -> MatchEnd | None:
+        for index, head in enumerate(self._inbox):
+            if head.get("type") == MsgType.MATCH_END:
+                del self._inbox[index]
+                end = self._parse_match_end(head)
+                self._match_end = end
+                return end
+        return None
+
     async def _pump_one(self) -> None:
         """Read one wire message: apply control side-effects or enqueue for `_recv`."""
-        message = await self._read_wire()
-        if self._handle_opponent_control(message):
-            return
-        self._inbox.append(message)
+        async with self._wire_lock:
+            if self._inbox:
+                return
+            message = await self._read_wire()
+            if self._handle_opponent_control(message):
+                return
+            self._inbox.append(message)
 
     async def _recv(self) -> dict[str, Any]:
         while True:
             if self._inbox:
                 return self._inbox.popleft()
-            message = await self._read_wire()
-            if self._handle_opponent_control(message):
-                continue
-            return message
+            async with self._wire_lock:
+                if self._inbox:
+                    return self._inbox.popleft()
+                message = await self._read_wire()
+                if self._handle_opponent_control(message):
+                    continue
+                return message
 
 
 # Re-export rule errors for seam callers

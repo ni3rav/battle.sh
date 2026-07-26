@@ -471,9 +471,11 @@ class PlacementScreen(Screen[None]):
             )
 
     async def _lock_and_wait(self) -> None:
+        # Cancel Abandon watch; MatchConnection serializes wire reads so a
+        # lingering poll cannot steal the opponent's commitment from ``_recv``.
         if self._watch_worker is not None and self._watch_worker.state == WorkerState.RUNNING:
             self._watch_worker.cancel()
-            self._watch_worker = None
+        self._watch_worker = None
         try:
             await self.conn.lock_placement(self._placement)
         except (MatchConnectionError, OSError, ConnectionError) as exc:
@@ -528,7 +530,7 @@ class PlacementScreen(Screen[None]):
         """Confirmed two-step Ctrl+C: leave_match so the opponent Abandons now."""
         if self._watch_worker is not None and self._watch_worker.state == WorkerState.RUNNING:
             self._watch_worker.cancel()
-            self._watch_worker = None
+        self._watch_worker = None
         match_time = format_elapsed(
             _battle_app(self).clock.now() - self._match_started_at
         )
@@ -640,6 +642,7 @@ class CombatScreen(Screen[None]):
             self._start_aim_watch()
 
     def _cancel_watch(self) -> None:
+        """Request cancel without awaiting (safe from sync key handlers)."""
         if self._watch_worker is not None and self._watch_worker.state == WorkerState.RUNNING:
             self._watch_worker.cancel()
         self._watch_worker = None
