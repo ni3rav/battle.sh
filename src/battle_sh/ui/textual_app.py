@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import signal
 from collections.abc import Callable
 from typing import Literal, cast
 
@@ -516,8 +518,7 @@ class PlacementScreen(Screen[None]):
             while self._phase == "editing":
                 end = await self.conn.poll_incoming(timeout=0.05)
                 if end is not None:
-                    self.set_status(f"Match {end.outcome}.")
-                    await self._close_and_return_to_opening()
+                    await self._show_abandoned_end(end)
                     return
         except WorkerCancelled:
             return
@@ -529,8 +530,25 @@ class PlacementScreen(Screen[None]):
         if self._watch_worker is not None and self._watch_worker.state == WorkerState.RUNNING:
             self._watch_worker.cancel()
             self._watch_worker = None
+        match_time = format_elapsed(
+            _battle_app(self).clock.now() - self._match_started_at
+        )
         await _leave_and_close(self.conn)
-        await self._return_to_opening()
+        _battle_app(self).show_match_end(
+            role=self.role,
+            end=MatchEnd(outcome=MatchOutcome.ABANDONED, reason="left"),
+            match_time=match_time,
+        )
+
+    async def _show_abandoned_end(self, end: MatchEnd) -> None:
+        match_time = format_elapsed(
+            _battle_app(self).clock.now() - self._match_started_at
+        )
+        with contextlib.suppress(OSError, ConnectionError):
+            await self.conn.close()
+        _battle_app(self).show_match_end(
+            role=self.role, end=end, match_time=match_time
+        )
 
     async def _close_and_return_to_opening(self) -> None:
         with contextlib.suppress(OSError, ConnectionError):
@@ -852,8 +870,13 @@ class CombatScreen(Screen[None]):
         if self._action_worker is not None and self._action_worker.state == WorkerState.RUNNING:
             self._action_worker.cancel()
             self._action_worker = None
+        match_time = self._freeze_match_time()
         await _leave_and_close(self.conn)
-        await self._return_to_opening()
+        _battle_app(self).show_match_end(
+            role=self.role,
+            end=MatchEnd(outcome=MatchOutcome.ABANDONED, reason="left"),
+            match_time=match_time,
+        )
 
     async def _close_and_return_to_opening(self) -> None:
         with contextlib.suppress(OSError, ConnectionError):
@@ -938,6 +961,7 @@ class BattleShApp(App[None]):
         self.placement_factory = (
             placement_factory if placement_factory is not None else random_placement
         )
+        self._sigint_installed = False
 
     @property
     def clock(self) -> Clock:
@@ -945,6 +969,22 @@ class BattleShApp(App[None]):
 
     def get_default_screen(self) -> OpeningScreen:
         return OpeningScreen()
+
+    def on_mount(self) -> None:
+        """Route OS SIGINT into the same QuitArm path as typed Ctrl+C."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.add_signal_handler(signal.SIGINT, self.action_quit_interrupt)
+        except (NotImplementedError, RuntimeError, ValueError):
+            return
+        self._sigint_installed = True
+
+    def on_unmount(self) -> None:
+        if not self._sigint_installed:
+            return
+        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+            asyncio.get_running_loop().remove_signal_handler(signal.SIGINT)
+        self._sigint_installed = False
 
     def show_placement(self, *, role: Role, conn: MatchConnection) -> None:
         """Guest has joined — start Match time and open the Placement screen."""

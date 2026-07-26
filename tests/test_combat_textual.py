@@ -258,6 +258,7 @@ async def test_scripted_winner_match_then_opening_with_frozen_match_time() -> No
 
 @pytest.mark.asyncio
 async def test_two_step_ctrl_c_during_combat_wait_abandons() -> None:
+    """Off-turn wait: confirmed Ctrl+C sends leave_match; opponent Abandons now."""
     clock = FakeClock(start=0.0)
     async with start_relay() as relay_url:
         host_app = make_app(relay_url, clock, placement_factory=_fixed_placement)
@@ -283,15 +284,115 @@ async def test_two_step_ctrl_c_during_combat_wait_abandons() -> None:
                 await guest_pilot.press("ctrl+c")
                 await wait_until(
                     guest_pilot,
-                    lambda: isinstance(guest_app.screen, OpeningScreen),
+                    lambda: isinstance(guest_app.screen, MatchEndScreen)
+                    and "Abandoned" in guest_app.screen.body_text(),
                     attempts=100,
+                )
+                assert isinstance(guest_app.screen, MatchEndScreen)
+                assert guest_app.screen.end.outcome == "abandoned"
+                assert guest_app.screen.end.reason == "left"
+                await wait_until(
+                    host_pilot,
+                    lambda: isinstance(host_app.screen, MatchEndScreen)
+                    and "Abandoned" in host_app.screen.body_text(),
+                    attempts=100,
+                )
+                assert isinstance(host_app.screen, MatchEndScreen)
+                assert host_app.screen.end.outcome == "abandoned"
+                assert host_app.screen.end.reason == "left"
+                await guest_pilot.press("enter")
+                await host_pilot.press("enter")
+                await wait_until(
+                    guest_pilot,
+                    lambda: isinstance(guest_app.screen, OpeningScreen),
+                    attempts=80,
                 )
                 await wait_until(
                     host_pilot,
-                    lambda: isinstance(host_app.screen, (MatchEndScreen, OpeningScreen))
-                    or (
-                        isinstance(host_app.screen, CombatScreen)
-                        and "Abandoned" in host_app.screen.status_text()
-                    ),
+                    lambda: isinstance(host_app.screen, OpeningScreen),
+                    attempts=80,
+                )
+
+
+@pytest.mark.asyncio
+async def test_two_step_ctrl_c_during_aim_abandons_via_leave_match() -> None:
+    """Mid-Aim confirmed Ctrl+C sends leave_match; opponent Abandons immediately."""
+    from battle_sh.networking.connection import MatchConnection
+
+    clock = FakeClock(start=0.0)
+    async with start_relay() as relay_url:
+        host_app = make_app(relay_url, clock, placement_factory=_fixed_placement)
+        guest_conn: MatchConnection | None = None
+        try:
+            async with host_app.run_test(size=(120, 40)) as host_pilot:
+                waiting = await host_to_waiting(host_pilot, host_app)
+                invite = waiting.displayed_invite()
+                assert invite is not None
+
+                guest_conn = await MatchConnection.connect(relay_url)
+                await guest_conn.join_match(invite)
+                await wait_until(
+                    host_pilot,
+                    lambda: isinstance(host_app.screen, PlacementScreen),
+                )
+                await host_pilot.press("y")
+                await guest_conn.lock_placement(_fixed_placement())
+                await guest_conn.wait_for_opponent_commitment()
+                await wait_until(
+                    host_pilot,
+                    lambda: isinstance(host_app.screen, CombatScreen)
+                    and "Aim" in host_app.screen.info_text()
+                    and "Waiting" not in host_app.screen.info_text(),
+                )
+
+                await host_pilot.press("ctrl+c")
+                await host_pilot.pause()
+                assert isinstance(host_app.screen, CombatScreen)
+                assert "Press Ctrl+C again" in host_app.screen.status_text()
+                clock.advance(1.0)
+                await host_pilot.press("ctrl+c")
+                await wait_until(
+                    host_pilot,
+                    lambda: isinstance(host_app.screen, MatchEndScreen)
+                    and "Abandoned" in host_app.screen.body_text(),
                     attempts=100,
                 )
+                assert isinstance(host_app.screen, MatchEndScreen)
+                assert host_app.screen.end.outcome == "abandoned"
+                assert host_app.screen.end.reason == "left"
+
+                end = await guest_conn.wait_for_match_end()
+                assert end.outcome == "abandoned"
+                assert end.reason == "left"
+
+                await host_pilot.press("enter")
+                await wait_until(
+                    host_pilot,
+                    lambda: isinstance(host_app.screen, OpeningScreen),
+                    attempts=80,
+                )
+        finally:
+            if guest_conn is not None:
+                await guest_conn.close()
+
+
+@pytest.mark.asyncio
+async def test_no_back_during_combat_and_q_does_not_quit() -> None:
+    async with start_relay() as relay_url:
+        host_app = make_app(relay_url, placement_factory=_fixed_placement)
+        guest_app = make_app(relay_url, placement_factory=_fixed_placement)
+        async with host_app.run_test(size=(120, 40)) as host_pilot:
+            waiting = await host_to_waiting(host_pilot, host_app)
+            invite = waiting.displayed_invite()
+            assert invite is not None
+            async with guest_app.run_test(size=(120, 40)) as guest_pilot:
+                await _both_to_combat(
+                    host_pilot, guest_pilot, host_app, guest_app, invite
+                )
+                await host_pilot.press("escape")
+                await host_pilot.pause()
+                assert isinstance(host_app.screen, CombatScreen)
+                await host_pilot.press("q")
+                await host_pilot.pause()
+                assert host_app.is_running
+                assert isinstance(host_app.screen, CombatScreen)

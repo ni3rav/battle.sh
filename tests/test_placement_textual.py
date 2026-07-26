@@ -11,6 +11,7 @@ from battle_sh.ui.clock import FakeClock
 from battle_sh.ui.textual_app import (
     CombatScreen,
     JoinScreen,
+    MatchEndScreen,
     OpeningScreen,
     PlacementScreen,
 )
@@ -266,14 +267,24 @@ async def test_two_step_ctrl_c_during_placement_abandons_for_both() -> None:
                 await host_pilot.press("ctrl+c")
                 await wait_until(
                     host_pilot,
-                    lambda: not host_app.is_running
-                    or isinstance(host_app.screen, OpeningScreen),
+                    lambda: isinstance(host_app.screen, MatchEndScreen)
+                    and "Abandoned" in host_app.screen.body_text(),
                     attempts=100,
                 )
+                assert isinstance(host_app.screen, MatchEndScreen)
+                assert host_app.screen.end.outcome == "abandoned"
+                assert host_app.screen.end.reason == "left"
 
                 end = await guest_conn.wait_for_match_end()
                 assert end.outcome == "abandoned"
                 assert end.reason == "left"
+
+                await host_pilot.press("enter")
+                await wait_until(
+                    host_pilot,
+                    lambda: isinstance(host_app.screen, OpeningScreen),
+                    attempts=80,
+                )
         finally:
             if guest_conn is not None:
                 await guest_conn.close()

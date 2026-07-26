@@ -22,7 +22,7 @@ from battle_sh.observability import (
     shutdown_logging,
 )
 from battle_sh.rules.placement import Placement, coordinate
-from battle_sh.ui.play import _connection_lost_message  # pyright: ignore[reportPrivateUsage]
+from battle_sh.ui.play import connection_lost_message
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
@@ -151,6 +151,6 @@ def test_connection_lost_message_names_keepalive_timeout() -> None:
         Close(1011, "keepalive ping timeout"),
         True,
     )
-    message = _connection_lost_message(exc)
+    message = connection_lost_message(exc)
     assert "keepalive timeout" in message.lower()
     assert "Abandoned" in message

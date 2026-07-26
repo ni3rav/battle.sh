@@ -1,15 +1,10 @@
-"""Fixed three-band Match UI shell (top | board+controls | bottom)."""
+"""Match UI chrome helpers: controls copy, status line, scoreboard."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from battle_sh.rules.board import ShotResultKind
-from battle_sh.rules.placement import Coordinate, Placement
-from battle_sh.ui.boards import own_board_renderable, tracking_board_renderable
 from rich.console import Group, RenderableType
-from rich.layout import Layout
-from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
@@ -62,18 +57,8 @@ SPINNER = ("|", "/", "-", "\\")
 
 
 @dataclass(frozen=True)
-class CombatBoards:
-    """Own + tracking Board state shared by combat Aim and wait frames."""
-
-    placement: Placement
-    own_marks: dict[Coordinate, ShotResultKind]
-    tracking: dict[Coordinate, ShotResultKind]
-    revealed: frozenset[Coordinate]
-
-
-@dataclass(frozen=True)
 class MatchStatus:
-    """Real-time scoreboard/status shared across the Match UI frames."""
+    """Real-time scoreboard/status shared across Match UI screens."""
 
     role: str
     state: str
@@ -97,7 +82,7 @@ def _dot(connected: bool) -> str:
 
 
 def connection_line(status: MatchStatus) -> str:
-    """Compact link/turn/state markup line shared by every frame's info band."""
+    """Compact link/turn/state markup line for the info band."""
     sync = "[green]in sync[/]" if status.synchronized else "[yellow]syncing…[/]"
     return (
         f"Link: {_dot(status.you_connected)} You  "
@@ -157,191 +142,4 @@ def sidebar_scoreboard_renderable(status: MatchStatus) -> RenderableType:
                 f"Sunk you:{sunk}  enemy:{enemy_sunk}",
             ]
         )
-    )
-
-
-def _three_band(
-    *,
-    top: RenderableType,
-    middle_left: RenderableType,
-    middle_right: RenderableType,
-    bottom: RenderableType,
-    top_size: int = 3,
-    right_size: int = 28,
-    right_title: str = "controls",
-) -> Layout:
-    layout = Layout()
-    layout.split_column(
-        Layout(Panel(top, title="info", padding=(0, 1)), name="top", size=top_size),
-        Layout(name="middle", ratio=1),
-        Layout(Panel(bottom, title="status", padding=(0, 1)), name="bottom", size=3),
-    )
-    layout["middle"].split_row(
-        Layout(Panel(middle_left, title="board", padding=(0, 1)), name="board", ratio=3),
-        Layout(
-            Panel(middle_right, title=right_title, padding=(0, 1)),
-            name="controls",
-            size=right_size,
-        ),
-    )
-    return layout
-
-
-def placement_frame(
-    *,
-    placement: Placement,
-    selected: str | None,
-    status: str = "",
-    top_info: str = "Phase: Placement",
-) -> RenderableType:
-    """Compose the Placement three-band view (pure; no Live)."""
-    board = own_board_renderable(placement, {}, selected=selected)
-    selected_line = (
-        f"Selected: [bold yellow]{selected}[/]"
-        if selected
-        else "No ship selected — press [bold]1-5[/] or [bold]tab[/]."
-    )
-    board_body: RenderableType = Group(board, Text.from_markup(selected_line))
-    return _three_band(
-        top=Text(top_info),
-        middle_left=board_body,
-        middle_right=Text.from_markup(PLACEMENT_CONTROLS),
-        right_size=32,
-        bottom=Text(status or " "),
-    )
-
-
-def lobby_frame(
-    *,
-    role: str,
-    invite: str,
-    status: str = "Waiting for Guest…",
-    status_info: MatchStatus | None = None,
-) -> RenderableType:
-    """Host lobby: waiting for Guest; Match time has not started."""
-    headline = Text(f"{role} · Lobby — waiting for Guest (Invite {invite})")
-    top: RenderableType = (
-        Group(headline, Text.from_markup(connection_line(status_info)))
-        if status_info is not None
-        else headline
-    )
-    body = Text(
-        "Share the Invite with your opponent.\nMatch time starts when they join."
-    )
-    return _three_band(
-        top=top,
-        top_size=4 if status_info is not None else 3,
-        middle_left=body,
-        middle_right=Text.from_markup(WAIT_CONTROLS),
-        bottom=Text(status or " "),
-    )
-
-
-def wait_frame(
-    *,
-    role: str,
-    phase: str,
-    match_time: str,
-    spinner_frame: int = 0,
-    status: str = "Waiting…",
-    board: RenderableType | None = None,
-    status_info: MatchStatus | None = None,
-) -> RenderableType:
-    """Wait chrome with Match time and spinner; only quit keys in controls."""
-    spin = SPINNER[spinner_frame % len(SPINNER)]
-    headline = Text(f"{role} · {phase} · Match time {match_time}  {spin}")
-    top: RenderableType = (
-        Group(headline, Text.from_markup(connection_line(status_info)))
-        if status_info is not None
-        else headline
-    )
-    middle = board if board is not None else Text("Boards stay visible while you wait.")
-    return _three_band(
-        top=top,
-        top_size=4 if status_info is not None else 3,
-        middle_left=middle,
-        middle_right=Text.from_markup(WAIT_CONTROLS),
-        bottom=Text(status or " "),
-    )
-
-
-def _combat_info_top(
-    headline: str, status_info: MatchStatus | None
-) -> RenderableType:
-    if status_info is None:
-        return Text(headline)
-    return Group(
-        Text(headline),
-        Text.from_markup(connection_line(status_info)),
-    )
-
-
-def _combat_boards(
-    boards: CombatBoards, *, aim: Coordinate | None = None
-) -> RenderableType:
-    """Own fleet stacked above tracking/Aim so the middle band stays tall enough."""
-    return Group(
-        own_board_renderable(boards.placement, boards.own_marks),
-        Text(""),
-        tracking_board_renderable(boards.tracking, boards.revealed, aim=aim),
-    )
-
-
-def _combat_sidebar(
-    status_info: MatchStatus | None, controls: str
-) -> RenderableType:
-    """Keymap first so stacked controls stay visible; scoreboard below."""
-    controls_text = Text.from_markup(controls)
-    if status_info is None:
-        return controls_text
-    return Group(
-        controls_text,
-        Text(""),
-        sidebar_scoreboard_renderable(status_info),
-    )
-
-
-def combat_frame(
-    *,
-    role: str,
-    match_time: str,
-    boards: CombatBoards,
-    aim: Coordinate,
-    status: str = "",
-    status_info: MatchStatus | None = None,
-) -> RenderableType:
-    """Your turn: own + Aim boards stacked; scoreboard + controls in the sidebar."""
-    return _three_band(
-        top=_combat_info_top(
-            f"{role} · Aim · Match time {match_time}", status_info
-        ),
-        top_size=4 if status_info is not None else 3,
-        middle_left=_combat_boards(boards, aim=aim),
-        middle_right=_combat_sidebar(status_info, AIM_CONTROLS),
-        right_size=32,
-        bottom=Text(status or " "),
-    )
-
-
-def combat_wait_frame(
-    *,
-    role: str,
-    match_time: str,
-    boards: CombatBoards,
-    spinner_frame: int = 0,
-    status: str = "Waiting for opponent…",
-    status_info: MatchStatus | None = None,
-) -> RenderableType:
-    """Opponent's turn: same board stack; wait controls in the sidebar."""
-    spin = SPINNER[spinner_frame % len(SPINNER)]
-    status_line = f"{spin} {status}" if status else spin
-    return _three_band(
-        top=_combat_info_top(
-            f"{role} · Waiting · Match time {match_time}", status_info
-        ),
-        top_size=4 if status_info is not None else 3,
-        middle_left=_combat_boards(boards),
-        middle_right=_combat_sidebar(status_info, WAIT_CONTROLS),
-        right_size=32,
-        bottom=Text(status_line),
     )

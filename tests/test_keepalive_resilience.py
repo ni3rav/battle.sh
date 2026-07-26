@@ -1,16 +1,15 @@
-"""Regression tests for the WebSocket keepalive ping-timeout disconnect.
+"""Regression tests for WebSocket keepalive while a Match is idle.
 
-The Match dropped with ``1011 keepalive ping timeout`` because the UI read keys
-with a blocking call on the asyncio event loop, so the client could not answer
-the Relay's keepalive pings while a Player was thinking. These tests pin the fix:
-key reads happen off the loop, so the loop keeps servicing keepalive.
+The old Rich Live path blocked the asyncio loop with on-loop key reads, so the
+client stopped answering Relay pings during Placement/Aim. Textual keys are
+handled on the app loop; these tests pin that an idle connected client still
+survives aggressive keepalive, and that the Relay survives a vanishing peer.
 """
 
 from __future__ import annotations
 
 import asyncio
 import threading
-import time
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -22,9 +21,6 @@ from battle_sh.networking.connection import MatchConnection
 from battle_sh.networking.protocol import MsgType
 from battle_sh.networking.relay import start_relay
 from battle_sh.rules.placement import Placement, coordinate
-from battle_sh.ui.aim_flow import run_aim_async
-from battle_sh.ui.keys import Key, KeySource
-from battle_sh.ui.placement_flow import run_placement_async
 
 
 def _placement_a() -> Placement:
@@ -53,12 +49,7 @@ def _placement_b() -> Placement:
 
 @contextmanager
 def _relay_in_background_thread() -> Generator[str, None, None]:
-    """Run the Relay on its own event loop/thread so its keepalive is independent.
-
-    An in-process Relay shares the client's event loop, so blocking that loop
-    would freeze both ends and never fire a timeout. A separate loop lets the
-    Relay actually time out a client that stops answering pings.
-    """
+    """Run the Relay on its own event loop/thread so its keepalive is independent."""
     loop = asyncio.new_event_loop()
     ready = threading.Event()
     url_holder: dict[str, str] = {}
@@ -95,105 +86,10 @@ def _relay_in_background_thread() -> Generator[str, None, None]:
         thread.join(5.0)
 
 
-class _GatedKeySource:
-    """KeySource whose ``read`` blocks the calling thread until released."""
-
-    def __init__(self, key: Key, gate: threading.Event) -> None:
-        self._key = key
-        self._gate = gate
-
-    def read(self) -> Key:
-        self._gate.wait(2.0)
-        return self._key
-
-    def try_read(self, timeout: float = 0.0) -> Key | None:
-        return None
-
-
-class _DelayFirstReadKeySource:
-    """Blocks the first ``read`` by ``delay`` seconds to mimic a thinking Player."""
-
-    def __init__(self, keys: list[str], *, delay: float) -> None:
-        self._keys = list(keys)
-        self._delay = delay
-        self._delayed = False
-        self._index = 0
-
-    def read(self) -> Key:
-        if not self._delayed:
-            self._delayed = True
-            time.sleep(self._delay)
-        key = self._keys[self._index]
-        self._index += 1
-        return Key(key)
-
-    def try_read(self, timeout: float = 0.0) -> Key | None:
-        return None
-
-
-async def test_run_aim_async_does_not_block_the_event_loop() -> None:
-    """While a key read is pending, other coroutines keep making progress."""
-    gate = threading.Event()
-    keys: KeySource = _GatedKeySource(Key("f"), gate)
-
-    ticks = 0
-
-    async def heartbeat() -> None:
-        nonlocal ticks
-        for _ in range(5):
-            await asyncio.sleep(0.02)
-            ticks += 1
-
-    aim_task = asyncio.create_task(
-        run_aim_async(keys, fired=frozenset())
-    )
-    await heartbeat()
-
-    # The loop ran the heartbeat to completion even though the key read is still
-    # blocked — a blocking on-loop read would have frozen it at zero ticks.
-    assert ticks == 5
-    assert not aim_task.done()
-
-    gate.set()
-    aim = await asyncio.wait_for(aim_task, timeout=2.0)
-    assert aim == coordinate("A", 1)
-
-
-async def test_run_placement_async_does_not_block_the_event_loop() -> None:
-    gate = threading.Event()
-    keys: KeySource = _GatedKeySource(Key("y"), gate)
-
-    ticks = 0
-
-    async def heartbeat() -> None:
-        nonlocal ticks
-        for _ in range(5):
-            await asyncio.sleep(0.02)
-            ticks += 1
-
-    task = asyncio.create_task(
-        run_placement_async(keys, placement_factory=_placement_a)
-    )
-    await heartbeat()
-
-    assert ticks == 5
-    assert not task.done()
-
-    gate.set()
-    placement = await asyncio.wait_for(task, timeout=2.0)
-    assert placement == _placement_a()
-
-
-async def test_slow_turn_does_not_trigger_keepalive_timeout(
+async def test_idle_match_does_not_trigger_keepalive_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A slow (blocking) Placement no longer drops the Relay connection.
-
-    With an aggressive keepalive and the Relay on its own loop, a turn that idles
-    far longer than the ping timeout would previously be closed with 1011.
-    Because key reads run off the loop, the client keeps answering pings and the
-    connection survives an end-to-end slow turn.
-    """
+    """An idle connected client still answers pings through a long think pause."""
     for module in (relay_mod, connection_mod):
         monkeypatch.setattr(module, "KEEPALIVE_PING_INTERVAL", 0.2)
         monkeypatch.setattr(module, "KEEPALIVE_PING_TIMEOUT", 0.2)
@@ -206,17 +102,10 @@ async def test_slow_turn_does_not_trigger_keepalive_timeout(
             await guest.join_match(invite)
             await host.wait_for_player_joined()
 
-            # "Think" for 1.5s (7.5x the ping timeout) while arranging ships. The
-            # read blocks a worker thread, not the event loop, so the client keeps
-            # answering the Relay's pings.
-            slow_keys = _DelayFirstReadKeySource(["y"], delay=1.5)
-            placement = await run_placement_async(
-                slow_keys, placement_factory=_placement_a
-            )
+            # Think far longer than the ping timeout; the loop must stay alive.
+            await asyncio.sleep(1.5)
 
-            # If the slow turn had starved the loop, the Relay (separate loop)
-            # would have closed this connection and lock_placement would raise.
-            await host.lock_placement(placement)
+            await host.lock_placement(_placement_a())
             await guest.lock_placement(_placement_b())
             await host.wait_for_opponent_commitment()
             await guest.wait_for_opponent_commitment()
