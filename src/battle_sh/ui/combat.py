@@ -1,20 +1,15 @@
-"""Shared combat helpers used by the Textual Match UI."""
+"""Combat helpers: scoreboard status, shot marks, and feedback copy."""
 
 from __future__ import annotations
 
-from battle_sh.networking.connection import (
-    MatchConnection,
-    ShotReport,
-    close_code_and_reason,
-)
+from battle_sh.networking.connection import MatchConnection, ShotReport
 from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import (
     STANDARD_FLEET_LENGTHS,
     Coordinate,
     Placement,
 )
-from battle_sh.ui.shell import MatchStatus
-from websockets.exceptions import ConnectionClosed
+from battle_sh.ui.chrome import MatchStatus
 
 FLEET_SIZE = len(STANDARD_FLEET_LENGTHS)
 TOTAL_CELLS = sum(STANDARD_FLEET_LENGTHS.values())
@@ -69,14 +64,6 @@ def combat_match_status(
         your_fleet=your_fleet,
         enemy_sunk=tuple(enemy_sunk_ships),
     )
-
-
-def connection_lost_message(exc: ConnectionClosed) -> str:
-    """Human-readable copy when the WebSocket drops mid-Match."""
-    _code, reason = close_code_and_reason(exc)
-    if "keepalive" in reason.lower():
-        return "Connection lost (keepalive timeout). Match Abandoned. Exiting."
-    return f"Connection lost: {exc}. Match Abandoned. Exiting."
 
 
 def apply_outgoing_shot(

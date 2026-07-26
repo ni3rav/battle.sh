@@ -1,14 +1,11 @@
-"""Immediate-key Aim driven by an injectable KeySource (key-rule seam)."""
+"""Pure Aim key rules and cursor helpers for the Textual Combat screen."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Literal
 
 from battle_sh.rules.placement import COLUMNS, ROWS, Coordinate, coordinate
-from battle_sh.ui.clock import Clock
-from battle_sh.ui.keys import MOVE_DELTA, Key, KeySource, key_token
-from battle_sh.ui.placement_flow import QuitRequested
+from battle_sh.ui.keys import MOVE_DELTA, Key, key_token
 from battle_sh.ui.quit_arm import QUIT_WARN, QuitArm
 
 _FIRE_KEYS = frozenset({"f", "enter", "space"})
@@ -24,7 +21,7 @@ def apply_aim_key(
     fired: frozenset[Coordinate],
     arm: QuitArm | None,
 ) -> tuple[Coordinate, str, _AimAction]:
-    """Pure per-key Aim transition shared by drivers and the Textual screen."""
+    """Pure per-key Aim transition used by the Textual Combat screen."""
     token = key_token(key)
     if key.is_interrupt:
         if arm is None or arm.handle_interrupt() == "confirm":
@@ -40,33 +37,6 @@ def apply_aim_key(
         if nxt is not None:
             return nxt, status, "continue"
     return aim, status, "continue"
-
-
-def run_aim(
-    keys: KeySource,
-    *,
-    fired: frozenset[Coordinate],
-    start: Coordinate | None = None,
-    on_cursor: Callable[[Coordinate], None] | None = None,
-    clock: Clock | None = None,
-) -> Coordinate:
-    """Scripted Aim via immediate keys until the Player fires (key-rule tests)."""
-    aim = initial_aim(start, fired)
-    arm = QuitArm(clock) if clock is not None else None
-    status = ""
-    while True:
-        if arm is not None:
-            arm.expire_if_due()
-        if on_cursor is not None:
-            on_cursor(aim)
-        key = keys.read()
-        aim, status, action = apply_aim_key(
-            key, aim, status, fired=fired, arm=arm
-        )
-        if action == "quit":
-            raise QuitRequested
-        if action == "fire":
-            return aim
 
 
 def initial_aim(

@@ -1,10 +1,11 @@
-"""KeySource seam: scripted immediate keys without a real TTY."""
+"""Scripted key driver: immediate keys without a real TTY."""
 
 from __future__ import annotations
 
 import pytest
 
-from battle_sh.ui.keys import INTERRUPT, Key, ScriptedKeySource
+from battle_sh.ui.keys import INTERRUPT, Key
+from key_drivers import ScriptedKeySource
 
 
 def test_scripted_key_source_yields_immediate_keys_in_order() -> None:

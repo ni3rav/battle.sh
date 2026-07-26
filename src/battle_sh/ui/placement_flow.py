@@ -1,8 +1,7 @@
-"""Immediate-key Placement driven by an injectable KeySource (key-rule seam)."""
+"""Pure Placement key rules for the Textual Placement screen."""
 
 from __future__ import annotations
 
-import random
 from collections.abc import Callable
 from typing import Literal
 
@@ -10,13 +9,11 @@ from battle_sh.rules.placement import (
     STANDARD_FLEET_LENGTHS,
     IllegalPlacementError,
     Placement,
-    random_placement,
     rotate_ship,
     translate_ship,
     validate_placement,
 )
-from battle_sh.ui.clock import Clock
-from battle_sh.ui.keys import MOVE_DELTA, Key, KeySource, key_token
+from battle_sh.ui.keys import MOVE_DELTA, Key, key_token
 from battle_sh.ui.quit_arm import QUIT_WARN, QuitArm
 
 _SHIP_ORDER = tuple(STANDARD_FLEET_LENGTHS)
@@ -37,7 +34,7 @@ def apply_placement_key(
     factory: Callable[[], Placement],
     arm: QuitArm | None,
 ) -> tuple[Placement, str | None, _PlacementAction, str | None]:
-    """Pure per-key Placement transition shared by drivers and the Textual screen.
+    """Pure per-key Placement transition used by the Textual Placement screen.
 
     Returns the next ``placement`` and ``selected``, the control ``action``, and
     an optional status ``message`` to emit.
@@ -80,39 +77,6 @@ def apply_placement_key(
         except IllegalPlacementError:
             return placement, selected, "continue", "Can't move there."
     return placement, selected, "continue", None
-
-
-def run_placement(
-    keys: KeySource,
-    *,
-    on_message: Callable[[str], None] | None = None,
-    placement_factory: Callable[[], Placement] | None = None,
-    rng: random.Random | None = None,
-    clock: Clock | None = None,
-) -> Placement:
-    """Scripted Placement via immediate keys until lock (key-rule tests)."""
-    factory = placement_factory or (lambda: random_placement(rng))
-    placement = factory()
-    selected: str | None = None
-    arm = QuitArm(clock) if clock is not None else None
-
-    while True:
-        if arm is not None:
-            arm.expire_if_due()
-        key = keys.read()
-        placement, selected, action, message = apply_placement_key(
-            key,
-            placement,
-            selected,
-            factory=factory,
-            arm=arm,
-        )
-        if message is not None and on_message is not None:
-            on_message(message)
-        if action == "quit":
-            raise QuitRequested
-        if action == "lock":
-            return placement
 
 
 def _cycle_ship(selected: str | None, *, step: int) -> str:

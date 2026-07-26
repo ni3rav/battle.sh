@@ -22,7 +22,6 @@ from battle_sh.observability import (
     shutdown_logging,
 )
 from battle_sh.rules.placement import Placement, coordinate
-from battle_sh.ui.play import connection_lost_message
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
@@ -143,14 +142,3 @@ def test_close_code_and_reason_handles_missing_frames() -> None:
     code, reason = close_code_and_reason(exc)
     assert code is None
     assert reason == ""
-
-
-def test_connection_lost_message_names_keepalive_timeout() -> None:
-    exc = ConnectionClosed(
-        Close(1011, "keepalive ping timeout"),
-        Close(1011, "keepalive ping timeout"),
-        True,
-    )
-    message = connection_lost_message(exc)
-    assert "keepalive timeout" in message.lower()
-    assert "Abandoned" in message

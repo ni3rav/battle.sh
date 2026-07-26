@@ -1,4 +1,4 @@
-"""Match UI chrome helpers: controls copy, status line, scoreboard."""
+"""Match UI chrome: controls copy, connection line, scoreboard renderables."""
 
 from __future__ import annotations
 

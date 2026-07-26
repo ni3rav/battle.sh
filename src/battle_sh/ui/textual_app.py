@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import signal
 from collections.abc import Callable
 from typing import Literal, cast
 
@@ -33,17 +31,7 @@ from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import Coordinate, Placement, random_placement
 from battle_sh.ui.aim_flow import apply_aim_key, initial_aim
 from battle_sh.ui.boards import own_board_renderable, tracking_board_renderable
-from battle_sh.ui.clock import Clock, SystemClock, format_elapsed
-from battle_sh.ui.keys import Key
-from battle_sh.ui.placement_flow import apply_placement_key
-from battle_sh.ui.play import (
-    apply_incoming_shot,
-    apply_outgoing_shot,
-    combat_match_status,
-    format_shot_feedback,
-)
-from battle_sh.ui.quit_arm import QUIT_WARN, QuitArm
-from battle_sh.ui.shell import (
+from battle_sh.ui.chrome import (
     AIM_CONTROLS,
     PLACEMENT_CONTROLS,
     SPINNER,
@@ -52,6 +40,17 @@ from battle_sh.ui.shell import (
     connection_line,
     sidebar_scoreboard_renderable,
 )
+from battle_sh.ui.clock import Clock, SystemClock, format_elapsed
+from battle_sh.ui.combat import (
+    apply_incoming_shot,
+    apply_outgoing_shot,
+    combat_match_status,
+    format_shot_feedback,
+)
+from battle_sh.ui.keys import Key
+from battle_sh.ui.placement_flow import apply_placement_key
+from battle_sh.ui.quit_arm import QUIT_WARN, QuitArm
+from battle_sh.ui.sigint import install_sigint, uninstall_sigint
 
 BANNER = (
     "░██                      ░██       ░██    ░██                           ░██        \n"
@@ -972,18 +971,12 @@ class BattleShApp(App[None]):
 
     def on_mount(self) -> None:
         """Route OS SIGINT into the same QuitArm path as typed Ctrl+C."""
-        try:
-            loop = asyncio.get_running_loop()
-            loop.add_signal_handler(signal.SIGINT, self.action_quit_interrupt)
-        except (NotImplementedError, RuntimeError, ValueError):
-            return
-        self._sigint_installed = True
+        self._sigint_installed = install_sigint(self.action_quit_interrupt)
 
     def on_unmount(self) -> None:
         if not self._sigint_installed:
             return
-        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
-            asyncio.get_running_loop().remove_signal_handler(signal.SIGINT)
+        uninstall_sigint()
         self._sigint_installed = False
 
     def show_placement(self, *, role: Role, conn: MatchConnection) -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from battle_sh.ui.shell import MatchStatus, connection_line, scoreboard_renderable
+from battle_sh.ui.chrome import MatchStatus, connection_line, scoreboard_renderable
 from rich.console import Console
 
 
