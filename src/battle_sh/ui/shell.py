@@ -58,7 +58,7 @@ WAIT_CONTROLS = """\
   → quit
 """
 
-_SPINNER = ("|", "/", "-", "\\")
+SPINNER = ("|", "/", "-", "\\")
 
 
 @dataclass(frozen=True)
@@ -248,7 +248,7 @@ def wait_frame(
     status_info: MatchStatus | None = None,
 ) -> RenderableType:
     """Wait chrome with Match time and spinner; only quit keys in controls."""
-    spin = _SPINNER[spinner_frame % len(_SPINNER)]
+    spin = SPINNER[spinner_frame % len(SPINNER)]
     headline = Text(f"{role} · {phase} · Match time {match_time}  {spin}")
     top: RenderableType = (
         Group(headline, Text.from_markup(connection_line(status_info)))
@@ -333,7 +333,7 @@ def combat_wait_frame(
     status_info: MatchStatus | None = None,
 ) -> RenderableType:
     """Opponent's turn: same board stack; wait controls in the sidebar."""
-    spin = _SPINNER[spinner_frame % len(_SPINNER)]
+    spin = SPINNER[spinner_frame % len(SPINNER)]
     status_line = f"{spin} {status}" if status else spin
     return _three_band(
         top=_combat_info_top(

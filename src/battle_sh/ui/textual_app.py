@@ -25,7 +25,7 @@ from battle_sh.ui.clock import Clock, SystemClock, format_elapsed
 from battle_sh.ui.keys import Key
 from battle_sh.ui.placement_flow import apply_placement_key
 from battle_sh.ui.quit_arm import QUIT_WARN, QuitArm
-from battle_sh.ui.shell import PLACEMENT_CONTROLS, WAIT_CONTROLS
+from battle_sh.ui.shell import PLACEMENT_CONTROLS, SPINNER, WAIT_CONTROLS
 
 BANNER = (
     "░██                      ░██       ░██    ░██                           ░██        \n"
@@ -43,7 +43,6 @@ OPTION_EXIT = "exit"
 OPTION_BACK = "back"
 OPTION_SUBMIT_JOIN = "submit_join"
 
-_SPINNER = ("|", "/", "-", "\\")
 _PlacementPhase = Literal["editing", "waiting"]
 
 
@@ -345,7 +344,7 @@ class PlacementScreen(Screen[None]):
             yield Static(" ", id="status")
 
     def on_mount(self) -> None:
-        self.refresh_match_time()
+        self._refresh_info()
         self.set_interval(0.25, self._on_tick)
         self._watch_worker = self.run_worker(
             self._watch_match_end(),
@@ -355,33 +354,35 @@ class PlacementScreen(Screen[None]):
             exit_on_error=False,
         )
 
-    def is_waiting_for_opponent(self) -> bool:
-        return self._phase == "waiting"
-
     def info_text(self) -> str:
+        """Info-band text currently shown (Match time / wait headline)."""
         return str(self.query_one("#info", Static).content)
 
     def controls_text(self) -> str:
+        """Controls-band text currently shown."""
         return str(self.query_one("#controls", Static).content)
 
     def status_text(self) -> str:
+        """Status-band text currently shown."""
         return str(self.query_one("#status", Static).content)
 
     def board_text(self) -> str:
+        """Plain-text export of the board widget's current renderable."""
+        content = self.query_one("#board", Static).content
         console = Console(record=True, width=80, force_terminal=True)
-        console.print(own_board_renderable(self._placement, {}, selected=self._selected))
+        console.print(content)  # type: ignore[arg-type]
         return console.export_text()
 
     def set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message or " ")
 
-    def refresh_match_time(self) -> None:
+    def _refresh_info(self) -> None:
         """Refresh the info band Match time (and wait spinner when waiting)."""
         app = _battle_app(self)
         elapsed = format_elapsed(app.clock.now() - self._match_started_at)
         label = "Host" if self.role == "host" else "Guest"
         if self._phase == "waiting":
-            spin = _SPINNER[self._spin % len(_SPINNER)]
+            spin = SPINNER[self._spin % len(SPINNER)]
             text = (
                 f"{label} · Waiting for opponent Placement · "
                 f"Match time {elapsed}  {spin}"
@@ -395,7 +396,7 @@ class PlacementScreen(Screen[None]):
         app.quit_arm.expire_if_due()
         if self._phase == "waiting":
             self._spin += 1
-        self.refresh_match_time()
+        self._refresh_info()
 
     def _refresh_board(self) -> None:
         self.query_one("#board", Static).update(
@@ -412,7 +413,7 @@ class PlacementScreen(Screen[None]):
         self._phase = "waiting"
         self.query_one("#controls", Static).update(Text.from_markup(WAIT_CONTROLS))
         self.set_status("Waiting for opponent to lock…")
-        self.refresh_match_time()
+        self._refresh_info()
 
     def on_key(self, event: events.Key) -> None:
         if self._phase == "waiting":

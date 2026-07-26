@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import pytest
-from textual.pilot import Pilot
 
 from battle_sh.networking.connection import MatchConnection
 from battle_sh.networking.relay import start_relay
 from battle_sh.rules.placement import Placement, coordinate
 from battle_sh.ui.clock import FakeClock
 from battle_sh.ui.textual_app import (
-    BattleShApp,
-    HostWaitingScreen,
     JoinScreen,
     OpeningScreen,
     PlacementScreen,
     ReadyForCombatScreen,
 )
+from textual_helpers import host_to_waiting, make_app, wait_until
 
 
 def _fixed_placement() -> Placement:
@@ -33,67 +29,29 @@ def _fixed_placement() -> Placement:
     )
 
 
-def _app(
-    relay_url: str,
-    clock: FakeClock | None = None,
-    *,
-    placement_factory: Callable[[], Placement] | None = None,
-) -> BattleShApp:
-    return BattleShApp(
-        relay_url=relay_url,
-        grace_seconds=10.0,
-        clock=clock if clock is not None else FakeClock(),
-        placement_factory=placement_factory,
-    )
-
-
-async def _wait_until(
-    pilot: Pilot[None], predicate: Callable[[], bool], *, attempts: int = 80
-) -> None:
-    for _ in range(attempts):
-        if predicate():
-            return
-        await pilot.pause(0.05)
-    raise AssertionError("condition not met in time")
-
-
-async def _host_to_waiting(
-    pilot: Pilot[None], app: BattleShApp
-) -> HostWaitingScreen:
-    await pilot.pause()
-    await pilot.press("enter")  # Host
-    await _wait_until(
-        pilot,
-        lambda: isinstance(app.screen, HostWaitingScreen)
-        and app.screen.displayed_invite() is not None,
-    )
-    assert isinstance(app.screen, HostWaitingScreen)
-    return app.screen
-
-
 @pytest.mark.asyncio
 async def test_placement_screen_has_three_bands_and_placement_controls() -> None:
     async with start_relay() as relay_url:
-        host_app = _app(relay_url, placement_factory=_fixed_placement)
-        guest_app = _app(relay_url, placement_factory=_fixed_placement)
+        host_app = make_app(relay_url, placement_factory=_fixed_placement)
+        guest_app = make_app(relay_url, placement_factory=_fixed_placement)
         async with host_app.run_test(size=(120, 40)) as host_pilot:
-            waiting = await _host_to_waiting(host_pilot, host_app)
+            waiting = await host_to_waiting(host_pilot, host_app)
             invite = waiting.displayed_invite()
             assert invite is not None
 
             async with guest_app.run_test(size=(120, 40)) as guest_pilot:
                 await guest_pilot.pause()
                 await guest_pilot.press("down", "enter")
-                await _wait_until(
+                await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )
                 await guest_pilot.press(*list(invite))
                 await guest_pilot.press("enter")
-                await _wait_until(
+                await wait_until(
                     guest_pilot,
                     lambda: isinstance(guest_app.screen, PlacementScreen),
                 )
-                await _wait_until(
+                await wait_until(
                     host_pilot,
                     lambda: isinstance(host_app.screen, PlacementScreen),
                 )
@@ -115,10 +73,10 @@ async def test_placement_screen_has_three_bands_and_placement_controls() -> None
 async def test_match_time_starts_only_after_guest_joins_not_in_host_lobby() -> None:
     clock = FakeClock(start=100.0)
     async with start_relay() as relay_url:
-        host_app = _app(relay_url, clock, placement_factory=_fixed_placement)
-        guest_app = _app(relay_url, clock, placement_factory=_fixed_placement)
+        host_app = make_app(relay_url, clock, placement_factory=_fixed_placement)
+        guest_app = make_app(relay_url, clock, placement_factory=_fixed_placement)
         async with host_app.run_test(size=(120, 40)) as host_pilot:
-            waiting = await _host_to_waiting(host_pilot, host_app)
+            waiting = await host_to_waiting(host_pilot, host_app)
             invite = waiting.displayed_invite()
             assert invite is not None
             # Solo Host lobby: no Match time on the waiting screen.
@@ -129,16 +87,16 @@ async def test_match_time_starts_only_after_guest_joins_not_in_host_lobby() -> N
             async with guest_app.run_test(size=(120, 40)) as guest_pilot:
                 await guest_pilot.pause()
                 await guest_pilot.press("down", "enter")
-                await _wait_until(
+                await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )
                 await guest_pilot.press(*list(invite))
                 await guest_pilot.press("enter")
-                await _wait_until(
+                await wait_until(
                     guest_pilot,
                     lambda: isinstance(guest_app.screen, PlacementScreen),
                 )
-                await _wait_until(
+                await wait_until(
                     host_pilot,
                     lambda: isinstance(host_app.screen, PlacementScreen),
                 )
@@ -147,57 +105,95 @@ async def test_match_time_starts_only_after_guest_joins_not_in_host_lobby() -> N
                 # Match clock starts at join, not 30s earlier during lobby wait.
                 assert "Match time 0:00" in host_screen.info_text()
                 clock.advance(65.0)
-                host_screen.refresh_match_time()
+                # Info band refreshes on the screen tick interval.
+                await host_pilot.pause(0.3)
                 assert "Match time 1:05" in host_screen.info_text()
 
 
 @pytest.mark.asyncio
-async def test_lock_commits_and_both_wait_then_both_ready() -> None:
+async def test_placement_keys_select_and_move_on_textual_screen() -> None:
+    """Textual Placement uses the same key rules (select + move) as the pure seam."""
     async with start_relay() as relay_url:
-        host_app = _app(relay_url, placement_factory=_fixed_placement)
-        guest_app = _app(relay_url, placement_factory=_fixed_placement)
+        host_app = make_app(relay_url, placement_factory=_fixed_placement)
+        guest_app = make_app(relay_url, placement_factory=_fixed_placement)
         async with host_app.run_test(size=(120, 40)) as host_pilot:
-            waiting = await _host_to_waiting(host_pilot, host_app)
+            waiting = await host_to_waiting(host_pilot, host_app)
             invite = waiting.displayed_invite()
             assert invite is not None
 
             async with guest_app.run_test(size=(120, 40)) as guest_pilot:
                 await guest_pilot.pause()
                 await guest_pilot.press("down", "enter")
-                await _wait_until(
+                await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )
                 await guest_pilot.press(*list(invite))
                 await guest_pilot.press("enter")
-                await _wait_until(
+                await wait_until(
                     guest_pilot,
                     lambda: isinstance(guest_app.screen, PlacementScreen),
                 )
-                await _wait_until(
+                await wait_until(
+                    host_pilot,
+                    lambda: isinstance(host_app.screen, PlacementScreen),
+                )
+
+                await host_pilot.press("5", "d", "d")
+                await host_pilot.pause()
+                host_screen = host_app.screen
+                assert isinstance(host_screen, PlacementScreen)
+                assert "Selected Destroyer" in host_screen.status_text()
+                # Destroyer moved from AB5 → CD5; glyph still on the board widget.
+                assert "D" in host_screen.board_text()
+
+
+@pytest.mark.asyncio
+async def test_lock_commits_and_both_wait_then_both_ready() -> None:
+    async with start_relay() as relay_url:
+        host_app = make_app(relay_url, placement_factory=_fixed_placement)
+        guest_app = make_app(relay_url, placement_factory=_fixed_placement)
+        async with host_app.run_test(size=(120, 40)) as host_pilot:
+            waiting = await host_to_waiting(host_pilot, host_app)
+            invite = waiting.displayed_invite()
+            assert invite is not None
+
+            async with guest_app.run_test(size=(120, 40)) as guest_pilot:
+                await guest_pilot.pause()
+                await guest_pilot.press("down", "enter")
+                await wait_until(
+                    guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
+                )
+                await guest_pilot.press(*list(invite))
+                await guest_pilot.press("enter")
+                await wait_until(
+                    guest_pilot,
+                    lambda: isinstance(guest_app.screen, PlacementScreen),
+                )
+                await wait_until(
                     host_pilot,
                     lambda: isinstance(host_app.screen, PlacementScreen),
                 )
 
                 # Host locks first → waiting for opponent commitment (spinner/wait).
                 await host_pilot.press("y")
-                await _wait_until(
+                await wait_until(
                     host_pilot,
                     lambda: isinstance(host_app.screen, PlacementScreen)
-                    and host_app.screen.is_waiting_for_opponent(),
+                    and "Waiting for opponent Placement"
+                    in host_app.screen.info_text(),
                 )
                 host_screen = host_app.screen
                 assert isinstance(host_screen, PlacementScreen)
-                assert "Waiting" in host_screen.info_text()
                 assert "→ quit" in host_screen.controls_text()
                 assert "→ lock" not in host_screen.controls_text()
 
                 # Guest locks → both commitments present → ready-for-combat stub.
                 await guest_pilot.press("y")
-                await _wait_until(
+                await wait_until(
                     host_pilot,
                     lambda: isinstance(host_app.screen, ReadyForCombatScreen),
                 )
-                await _wait_until(
+                await wait_until(
                     guest_pilot,
                     lambda: isinstance(guest_app.screen, ReadyForCombatScreen),
                 )
@@ -206,26 +202,26 @@ async def test_lock_commits_and_both_wait_then_both_ready() -> None:
 @pytest.mark.asyncio
 async def test_no_back_during_placement_and_q_does_not_quit() -> None:
     async with start_relay() as relay_url:
-        host_app = _app(relay_url, placement_factory=_fixed_placement)
-        guest_app = _app(relay_url, placement_factory=_fixed_placement)
+        host_app = make_app(relay_url, placement_factory=_fixed_placement)
+        guest_app = make_app(relay_url, placement_factory=_fixed_placement)
         async with host_app.run_test(size=(120, 40)) as host_pilot:
-            waiting = await _host_to_waiting(host_pilot, host_app)
+            waiting = await host_to_waiting(host_pilot, host_app)
             invite = waiting.displayed_invite()
             assert invite is not None
 
             async with guest_app.run_test(size=(120, 40)) as guest_pilot:
                 await guest_pilot.pause()
                 await guest_pilot.press("down", "enter")
-                await _wait_until(
+                await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )
                 await guest_pilot.press(*list(invite))
                 await guest_pilot.press("enter")
-                await _wait_until(
+                await wait_until(
                     guest_pilot,
                     lambda: isinstance(guest_app.screen, PlacementScreen),
                 )
-                await _wait_until(
+                await wait_until(
                     host_pilot,
                     lambda: isinstance(host_app.screen, PlacementScreen),
                 )
@@ -244,17 +240,17 @@ async def test_no_back_during_placement_and_q_does_not_quit() -> None:
 async def test_two_step_ctrl_c_during_placement_abandons_for_both() -> None:
     clock = FakeClock(start=0.0)
     async with start_relay() as relay_url:
-        host_app = _app(relay_url, clock, placement_factory=_fixed_placement)
+        host_app = make_app(relay_url, clock, placement_factory=_fixed_placement)
         guest_conn: MatchConnection | None = None
         try:
             async with host_app.run_test(size=(120, 40)) as host_pilot:
-                waiting = await _host_to_waiting(host_pilot, host_app)
+                waiting = await host_to_waiting(host_pilot, host_app)
                 invite = waiting.displayed_invite()
                 assert invite is not None
 
                 guest_conn = await MatchConnection.connect(relay_url)
                 await guest_conn.join_match(invite)
-                await _wait_until(
+                await wait_until(
                     host_pilot,
                     lambda: isinstance(host_app.screen, PlacementScreen),
                 )
@@ -268,7 +264,7 @@ async def test_two_step_ctrl_c_during_placement_abandons_for_both() -> None:
 
                 clock.advance(1.0)
                 await host_pilot.press("ctrl+c")
-                await _wait_until(
+                await wait_until(
                     host_pilot,
                     lambda: not host_app.is_running
                     or isinstance(host_app.screen, OpeningScreen),
