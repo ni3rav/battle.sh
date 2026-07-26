@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from battle_sh.rules.placement import Placement, coordinate, validate_placement
-from battle_sh.ui.keys import ScriptedKeySource
-from battle_sh.ui.placement_flow import QuitRequested, run_placement
+from battle_sh.ui.placement_flow import QuitRequested
+from key_drivers import ScriptedKeySource, run_placement
 
 
 def _fixed_placement() -> Placement:

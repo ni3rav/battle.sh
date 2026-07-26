@@ -13,16 +13,17 @@ run `uv`, or invoke Python modules to play.
 
 ## Play (`battle-sh`)
 
-The whole experience is one executable with exactly three modes:
+The whole experience is one executable:
 
 ```bash
-battle-sh relay     # run the Match Relay server
-battle-sh host      # start a new game and print an Invite
-battle-sh join      # join a game with an Invite (as the Guest)
+battle-sh                  # open the Textual player app (Host / Join / Exit)
+battle-sh --relay URL      # same, with a Relay URL
+battle-sh relay            # run the Match Relay server
 ```
 
 Point clients at a relay with `--relay` (or the `BATTLE_SH_RELAY` environment
-variable); it defaults to `ws://127.0.0.1:8765`.
+variable); it defaults to `ws://127.0.0.1:8765`. Reconnect grace is
+`--grace-seconds` (CLI-only).
 
 ```bash
 # Terminal A — Relay
@@ -30,17 +31,19 @@ battle-sh relay --bind-host 127.0.0.1 --port 8765
 ```
 
 ```bash
-# Terminal B — Host (prints an Invite phrase to share)
-battle-sh host --relay ws://127.0.0.1:8765
+# Terminal B — Player (Host)
+battle-sh --relay ws://127.0.0.1:8765
+# Choose Host; share the Invite shown on the waiting screen.
 ```
 
 ```bash
-# Terminal C — Guest (paste the Invite the Host printed)
-battle-sh join --relay ws://127.0.0.1:8765 --invite alpha-tango-jesse-ironman
+# Terminal C — Player (Guest)
+battle-sh --relay ws://127.0.0.1:8765
+# Choose Join; paste the Invite in-app.
 ```
 
 Against a hosted relay, use the `wss://` URL, e.g.
-`battle-sh host --relay wss://relay.example.com`.
+`battle-sh --relay wss://relay.example.com`.
 
 The Match UI shows a live scoreboard: active/remaining ships per side, hits,
 current turn, match state, and a connection indicator for both players.
@@ -59,7 +62,7 @@ uv run pytest
 
 ### Play
 
-Run the Relay on loopback, then open two terminals as Host and Guest:
+Run the Relay on loopback, then open two player terminals:
 
 ```bash
 uv sync
@@ -68,17 +71,19 @@ uv run python -m battle_sh.networking.relay_cli --bind-host 127.0.0.1 --port 876
 
 ```bash
 # Terminal A — Host
-uv run python -m battle_sh.ui host --relay ws://127.0.0.1:8765
+uv run battle-sh --relay ws://127.0.0.1:8765
+# Choose Host; share the Invite.
 ```
 
 ```bash
-# Terminal B — Guest (paste the Invite phrase the Host prints)
-uv run python -m battle_sh.ui guest --relay ws://127.0.0.1:8765 --invite alpha-tango-jesse-ironman
+# Terminal B — Guest
+uv run battle-sh --relay ws://127.0.0.1:8765
+# Choose Join; paste the Invite in-app.
 ```
 
 ### Live Match UI
 
-Fixed **three-band** layout: top = Match/role/turn + Match time; middle = wide board | phase-aware controls; bottom = status/errors. Match time starts when the Guest joins (not during Host lobby wait) and freezes on the Winner/Abandoned end screen.
+Fixed **three-band** layout: top = Match/role/turn + Match time; middle = wide board | phase-aware controls; bottom = status/errors. Match time starts when the Guest joins (not during Host lobby wait) and freezes on the Winner/Abandoned end screen. After end presentation, the app returns to the opening Host / Join / Exit menu.
 
 ### Key map
 
@@ -86,20 +91,20 @@ Fixed **three-band** layout: top = Match/role/turn + Match time; middle = wide b
 | --- | --- |
 | Placement | `1`–`5` or Tab / Shift+Tab select ship; `w/a/s/d` or arrows move; `e` / `r` flip H↔V; `t` re-roll; `y` lock |
 | Combat | `w/a/s/d` or arrows Aim (skips fired cells); `f` / Enter / Space fire |
-| Any Live phase | first Ctrl+C warns (status), second confirms Abandon and sends `leave_match` (both sides end immediately; no reconnect grace; arm auto-clears) |
+| Any Match phase | first Ctrl+C warns (status), second confirms Abandon and sends `leave_match` (both sides end immediately; no reconnect grace; arm auto-clears) |
 
-Waiting turns show a spinner; only Ctrl+C is honored for quit. Invite for Guest stays CLI `--invite` (or a one-shot paste before Live UI). Caddy and TLS are not required for local play.
+Waiting turns show a spinner; only Ctrl+C is honored for quit. `q` never quits. Back is available on Join and Host-waiting only (not mid-Match). Invite for Guest is entered in-app on Join. Caddy and TLS are not required for local play.
 
 ### Manual Host/Guest smoke checklist
 
 On a local Relay (commands above), in two terminals:
 
-1. Host creates a Match; confirm lobby shows waiting-for-Guest (no Match time yet).
-2. Guest joins with `--invite`; both see Match time start; three-band chrome stays stable.
+1. Host creates a Match from the opening menu; confirm lobby shows waiting-for-Guest (no Match time yet).
+2. Guest joins with the Invite in-app; both see Match time start; three-band chrome stays stable.
 3. Placement: move/rotate/re-roll with keys, then `y` to lock; opponent wait shows spinner.
 4. Combat: Aim with arrows/WASD, fire with `f`; confirm skip over already-fired cells.
-5. Quit path: two-step Ctrl+C Abandons immediately for both players (`leave_match`); both see `Match Abandoned. Exiting.`; end screen shows frozen Match time.
-6. Optional: play through to Winner and confirm frozen Match time on the end screen.
+5. Quit path: two-step Ctrl+C Abandons immediately for both players (`leave_match`); both see Match Abandoned with frozen Match time, then return to the opening menu.
+6. Optional: play through to Winner and confirm frozen Match time on the end screen before returning to opening.
 
 ## Run a Relay on any cloud VM (`wss://`)
 
@@ -137,8 +142,7 @@ That copies the app to `/opt/battle-sh`, installs **uv** and **Caddy** if needed
 Players then connect with:
 
 ```bash
-uv run python -m battle_sh.ui host --relay wss://relay.example.com
-uv run python -m battle_sh.ui guest --relay wss://relay.example.com --invite PASTE_INVITE
+battle-sh --relay wss://relay.example.com
 ```
 
 Preview files without touching a machine:

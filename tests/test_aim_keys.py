@@ -5,9 +5,8 @@ from __future__ import annotations
 import pytest
 
 from battle_sh.rules.placement import coordinate
-from battle_sh.ui.aim_flow import run_aim
-from battle_sh.ui.keys import ScriptedKeySource
 from battle_sh.ui.placement_flow import QuitRequested
+from key_drivers import ScriptedKeySource, run_aim
 
 
 def test_f_fires_at_a1_when_no_prior_shot() -> None:

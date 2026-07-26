@@ -20,15 +20,14 @@ script refreshes deps). Standard commands live in `README.md`; the gates match C
 (`.github/workflows/ci.yml`): `uv run pyright` (strict typecheck — this is the lint gate,
 there is no separate linter) and `uv run pytest`.
 
-To run/play locally, start the Relay then a Host and a Guest (see README "Local development"):
+To run/play locally, start the Relay then two player apps (see README "Local development"):
 Relay `uv run python -m battle_sh.networking.relay_cli --bind-host 127.0.0.1 --port 8765`,
-then `uv run python -m battle_sh.ui host|guest --relay ws://127.0.0.1:8765`. The Host prints
-a random Invite phrase the Guest passes via `--invite`.
+then `uv run battle-sh --relay ws://127.0.0.1:8765` twice. Choose Host on one and Join
+on the other; the Host shows an Invite the Guest pastes in-app.
 
 Non-obvious gotchas:
-- Placement and Aim read keys off the event loop (worker thread / polling) so the
-  WebSocket keepalive stays responsive while waiting for input. Lobby and
-  "waiting for opponent" screens are async and stay alive indefinitely.
+- The player UI is Textual (menu-first `battle-sh`); Lobby and wait screens stay async
+  so WebSocket keepalive remains responsive while waiting for input.
 - Quit is two-step Ctrl+C only (not `q`). SIGINT is routed into the same QuitArm
   path so a confirmed quit sends `leave_match` and the opponent Abandons
   immediately instead of waiting on reconnect grace.

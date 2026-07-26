@@ -1,23 +1,22 @@
-"""SIGINT must feed QuitArm via TerminalKeySource, not cancel without leave."""
+"""SIGINT must feed the same QuitArm path as typed Ctrl+C."""
 
 from __future__ import annotations
 
 import asyncio
 import signal
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
-from battle_sh.networking.connection import MatchConnection
-from battle_sh.ui.keys import INTERRUPT, ScriptedKeySource, TerminalKeySource
-from battle_sh.ui import play as play_mod
+from battle_sh.ui.clock import FakeClock
+from battle_sh.ui.quit_arm import QUIT_WARN
+from battle_sh.ui.textual_app import BattleShApp, OpeningScreen
 
 
-async def test_sigint_handler_queues_interrupt_on_terminal_keys(
+@pytest.mark.asyncio
+async def test_sigint_feeds_quit_arm_same_as_ctrl_c(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    keys = TerminalKeySource()
     registered: dict[str, Any] = {}
     loop = asyncio.get_running_loop()
 
@@ -28,62 +27,60 @@ async def test_sigint_handler_queues_interrupt_on_terminal_keys(
     def fake_remove(sig: int) -> None:
         registered["removed"] = sig
 
-    def stdin_not_ready(_timeout: float) -> bool:
-        return False
-
     monkeypatch.setattr(loop, "add_signal_handler", fake_add)
     monkeypatch.setattr(loop, "remove_signal_handler", fake_remove)
-    monkeypatch.setattr("battle_sh.ui.keys._stdin_ready", stdin_not_ready)
 
-    with play_mod._sigint_as_key_interrupt(keys):  # pyright: ignore[reportPrivateUsage]
+    clock = FakeClock(start=0.0)
+    app = BattleShApp(
+        relay_url="ws://127.0.0.1:8765",
+        grace_seconds=10.0,
+        clock=clock,
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
         assert "callback" in registered
-        registered["callback"]()
-        assert keys.try_read(0.0) == INTERRUPT
+        assert not app.quit_arm.is_armed
 
+        registered["callback"]()
+        await pilot.pause()
+        assert app.quit_arm.is_armed
+        assert isinstance(app.screen, OpeningScreen)
+        assert app.is_running
+
+        clock.advance(1.0)
+        registered["callback"]()
+        await pilot.pause()
+
+    assert not app.is_running
     assert registered.get("removed") == signal.SIGINT
 
 
-async def test_sigint_context_skips_scripted_key_source() -> None:
-    keys = ScriptedKeySource([])
-    # Must not raise even though ScriptedKeySource has no signal wiring.
-    with play_mod._sigint_as_key_interrupt(keys):  # pyright: ignore[reportPrivateUsage]
-        pass
+@pytest.mark.asyncio
+async def test_sigint_warn_copy_matches_ctrl_c_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered: dict[str, Any] = {}
+    loop = asyncio.get_running_loop()
 
+    def fake_add(_sig: int, callback: Any) -> None:
+        registered["callback"] = callback
 
-async def test_leave_on_quit_sends_leave_match() -> None:
-    conn = AsyncMock(spec=MatchConnection)
-    conn.leave_match = AsyncMock()
-    await play_mod._leave_on_quit(conn)  # pyright: ignore[reportPrivateUsage]
-    conn.leave_match.assert_awaited_once()
+    def fake_remove(_sig: int) -> None:
+        return None
 
+    monkeypatch.setattr(loop, "add_signal_handler", fake_add)
+    monkeypatch.setattr(loop, "remove_signal_handler", fake_remove)
 
-def test_announce_end_abandoned_uses_shared_exit_copy() -> None:
-    from collections import deque
-
-    from battle_sh.networking.connection import MatchEnd
-    from battle_sh.networking.protocol import MatchOutcome
-    from battle_sh.ui.play import ScriptedIO
-
-    io = ScriptedIO(inputs=deque())
-    end = MatchEnd(outcome=MatchOutcome.ABANDONED, reason="left")
-    play_mod._announce_end(  # pyright: ignore[reportPrivateUsage]
-        io, end, verification_ok=None, role="host", match_time="0:42"
+    app = BattleShApp(
+        relay_url="ws://127.0.0.1:8765",
+        grace_seconds=10.0,
+        clock=FakeClock(),
     )
-    assert io.outputs[0] == "Match Abandoned. Exiting."
-    assert "Match time 0:42" in io.outputs
-    assert "Exiting." not in io.outputs  # already in the abandon line
-
-
-def test_announce_end_abandoned_without_reason_same_copy() -> None:
-    from collections import deque
-
-    from battle_sh.networking.connection import MatchEnd
-    from battle_sh.networking.protocol import MatchOutcome
-    from battle_sh.ui.play import ScriptedIO
-
-    io = ScriptedIO(inputs=deque())
-    end = MatchEnd(outcome=MatchOutcome.ABANDONED)
-    play_mod._announce_end(  # pyright: ignore[reportPrivateUsage]
-        io, end, verification_ok=None, role="guest", match_time="1:00"
-    )
-    assert io.outputs[0] == "Match Abandoned. Exiting."
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        registered["callback"]()
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, OpeningScreen)
+        status = getattr(screen, "query_one")("#status").content
+        assert QUIT_WARN in str(status)

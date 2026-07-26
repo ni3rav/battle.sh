@@ -1,4 +1,4 @@
-"""Docs seam: key map, three-band Live UI, Match time, and Host/Guest smoke."""
+"""Docs seam: key map, three-band UI, Match time, menu-first play, and smoke."""
 
 from __future__ import annotations
 
@@ -20,5 +20,8 @@ def test_readme_documents_key_map_layout_match_time_and_ctrl_c() -> None:
     assert "match time" in text
     assert "smoke" in text
     assert "host" in text and "guest" in text
+    assert "battle-sh" in text
+    assert "join" in text
     assert "q quit" not in text
-    assert "`q`" not in text
+    # Document that q is not a quit key; do not list q as a binding.
+    assert "never quit" in text or "does not quit" in text or "never quits" in text
