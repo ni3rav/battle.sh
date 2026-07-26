@@ -19,7 +19,7 @@ _FIRE_KEYS = frozenset({"f", "enter", "space"})
 _AimAction = Literal["continue", "fire", "quit"]
 
 
-def _apply_aim_key(
+def apply_aim_key(
     key: Key,
     aim: Coordinate,
     status: str,
@@ -27,7 +27,7 @@ def _apply_aim_key(
     fired: frozenset[Coordinate],
     arm: QuitArm | None,
 ) -> tuple[Coordinate, str, _AimAction]:
-    """Pure per-key Aim transition shared by the sync and async drivers."""
+    """Pure per-key Aim transition shared by drivers and the Textual screen."""
     token = key_token(key)
     if key.is_interrupt:
         if arm is None or arm.handle_interrupt() == "confirm":
@@ -76,7 +76,7 @@ def run_aim(
             if live is not None and frame is not None:
                 live.update(frame(aim, status), refresh=True)  # type: ignore[arg-type]
             key = keys.read()
-            aim, status, action = _apply_aim_key(
+            aim, status, action = apply_aim_key(
                 key, aim, status, fired=fired, arm=arm
             )
             if action == "quit":
@@ -142,7 +142,7 @@ async def run_aim_async(
                 refresh_interval=tick_interval if tick else 1.0,
                 async_on_tick=async_on_tick,
             )
-            aim, status, action = _apply_aim_key(
+            aim, status, action = apply_aim_key(
                 key, aim, status, fired=fired, arm=arm
             )
             if action == "quit":

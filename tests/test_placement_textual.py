@@ -9,10 +9,10 @@ from battle_sh.networking.relay import start_relay
 from battle_sh.rules.placement import Placement, coordinate
 from battle_sh.ui.clock import FakeClock
 from battle_sh.ui.textual_app import (
+    CombatScreen,
     JoinScreen,
     OpeningScreen,
     PlacementScreen,
-    ReadyForCombatScreen,
 )
 from textual_helpers import host_to_waiting, make_app, wait_until
 
@@ -187,15 +187,15 @@ async def test_lock_commits_and_both_wait_then_both_ready() -> None:
                 assert "→ quit" in host_screen.controls_text()
                 assert "→ lock" not in host_screen.controls_text()
 
-                # Guest locks → both commitments present → ready-for-combat stub.
+                # Guest locks → both commitments present → Combat / Aim.
                 await guest_pilot.press("y")
                 await wait_until(
                     host_pilot,
-                    lambda: isinstance(host_app.screen, ReadyForCombatScreen),
+                    lambda: isinstance(host_app.screen, CombatScreen),
                 )
                 await wait_until(
                     guest_pilot,
-                    lambda: isinstance(guest_app.screen, ReadyForCombatScreen),
+                    lambda: isinstance(guest_app.screen, CombatScreen),
                 )
 
 

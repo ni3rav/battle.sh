@@ -48,8 +48,8 @@ from websockets.exceptions import ConnectionClosed
 
 T = TypeVar("T")
 
-_FLEET_SIZE = len(STANDARD_FLEET_LENGTHS)
-_TOTAL_CELLS = sum(STANDARD_FLEET_LENGTHS.values())
+FLEET_SIZE = len(STANDARD_FLEET_LENGTHS)
+TOTAL_CELLS = sum(STANDARD_FLEET_LENGTHS.values())
 
 
 async def _leave_on_quit(conn: MatchConnection) -> None:
@@ -85,7 +85,7 @@ def _sigint_as_key_interrupt(keys: KeySource) -> Generator[None]:
             loop.remove_signal_handler(signal.SIGINT)
 
 
-def _your_fleet_status(
+def your_fleet_status(
     placement: Placement, own_marks: dict[Coordinate, ShotResultKind]
 ) -> tuple[int, tuple[tuple[str, bool], ...]]:
     """Per-ship afloat/sunk state for our own fleet from incoming hit marks."""
@@ -100,8 +100,40 @@ def _your_fleet_status(
     return afloat, tuple(fleet)
 
 
-def _count_hits(marks: dict[Coordinate, ShotResultKind]) -> int:
+def count_hits(marks: dict[Coordinate, ShotResultKind]) -> int:
     return sum(1 for kind in marks.values() if kind in ("hit", "sunk"))
+
+
+def combat_match_status(
+    *,
+    conn: MatchConnection,
+    role: str,
+    placement: Placement,
+    own_marks: dict[Coordinate, ShotResultKind],
+    tracking: dict[Coordinate, ShotResultKind],
+    enemy_sunk_ships: list[str] | tuple[str, ...],
+) -> MatchStatus:
+    """Live Combat scoreboard/status shared by Rich play and Textual Combat."""
+    your_afloat, your_fleet = your_fleet_status(placement, own_marks)
+    over = conn.match_end is not None
+    connected = conn.is_connected
+    return MatchStatus(
+        role=role,
+        state="Match over" if over else "Combat",
+        turn="You" if conn.my_turn else "Opponent",
+        your_ships_afloat=your_afloat,
+        your_ships_total=FLEET_SIZE,
+        enemy_ships_afloat=FLEET_SIZE - len(enemy_sunk_ships),
+        enemy_ships_total=FLEET_SIZE,
+        your_hits=count_hits(tracking),
+        enemy_hits=count_hits(own_marks),
+        total_cells=TOTAL_CELLS,
+        you_connected=connected,
+        opponent_connected=connected and not over and conn.opponent_connected,
+        synchronized=conn.ready_to_fire,
+        your_fleet=your_fleet,
+        enemy_sunk=tuple(enemy_sunk_ships),
+    )
 
 
 def _phase_status(
@@ -113,13 +145,13 @@ def _phase_status(
         role=role,
         state=state,
         turn="—",
-        your_ships_afloat=_FLEET_SIZE,
-        your_ships_total=_FLEET_SIZE,
-        enemy_ships_afloat=_FLEET_SIZE,
-        enemy_ships_total=_FLEET_SIZE,
+        your_ships_afloat=FLEET_SIZE,
+        your_ships_total=FLEET_SIZE,
+        enemy_ships_afloat=FLEET_SIZE,
+        enemy_ships_total=FLEET_SIZE,
         your_hits=0,
         enemy_hits=0,
-        total_cells=_TOTAL_CELLS,
+        total_cells=TOTAL_CELLS,
         you_connected=connected,
         opponent_connected=connected and opponent_present and conn.opponent_connected,
         synchronized=conn.ready_to_fire,
@@ -460,25 +492,13 @@ async def _play_match(
         )
 
     def match_status() -> MatchStatus:
-        your_afloat, your_fleet = _your_fleet_status(placement, own_marks)
-        over = conn.match_end is not None
-        connected = conn.is_connected
-        return MatchStatus(
+        return combat_match_status(
+            conn=conn,
             role=role,
-            state="Match over" if over else "Combat",
-            turn="You" if conn.my_turn else "Opponent",
-            your_ships_afloat=your_afloat,
-            your_ships_total=_FLEET_SIZE,
-            enemy_ships_afloat=_FLEET_SIZE - len(enemy_sunk_ships),
-            enemy_ships_total=_FLEET_SIZE,
-            your_hits=_count_hits(tracking),
-            enemy_hits=_count_hits(own_marks),
-            total_cells=_TOTAL_CELLS,
-            you_connected=connected,
-            opponent_connected=connected and not over and conn.opponent_connected,
-            synchronized=conn.ready_to_fire,
-            your_fleet=your_fleet,
-            enemy_sunk=tuple(enemy_sunk_ships),
+            placement=placement,
+            own_marks=own_marks,
+            tracking=tracking,
+            enemy_sunk_ships=enemy_sunk_ships,
         )
 
     def elapsed() -> str:
@@ -507,12 +527,12 @@ async def _play_match(
                     freeze_match_time()
                     break
                 last_shot = parse_coordinate(report.coordinate)
-                _apply_outgoing(report, tracking, revealed)
+                apply_outgoing_shot(report, tracking, revealed)
                 if report.result == "sunk" and report.ship:
                     enemy_sunk_ships.append(report.ship)
                 if report.verification_ok is not None:
                     verification_ok = report.verification_ok
-                status_message = _format_shot_feedback(report, outgoing=True)
+                status_message = format_shot_feedback(report, outgoing=True)
             else:
                 wait_status = status_message or "Waiting for opponent…"
                 report = await _live_wait(
@@ -532,8 +552,8 @@ async def _play_match(
                 if report.match_end is not None:
                     freeze_match_time()
                     break
-                status_message = _format_shot_feedback(report, outgoing=False)
-                _apply_incoming(report, own_marks)
+                status_message = format_shot_feedback(report, outgoing=False)
+                apply_incoming_shot(report, own_marks)
     except (ConnectionClosed, asyncio.TimeoutError, MatchConnectionError) as exc:
         io.print(f"Connection issue: {exc}")
         match_time = freeze_match_time()
@@ -617,7 +637,7 @@ async def _take_shot_until_legal(
             io.print(f"Try again: {exc}")
 
 
-def _apply_outgoing(
+def apply_outgoing_shot(
     report: ShotReport,
     tracking: dict[Coordinate, ShotResultKind],
     revealed: set[Coordinate],
@@ -631,7 +651,7 @@ def _apply_outgoing(
         tracking[c] = "sunk"
 
 
-def _apply_incoming(
+def apply_incoming_shot(
     report: ShotReport, own_marks: dict[Coordinate, ShotResultKind]
 ) -> None:
     coord = parse_coordinate(report.coordinate)
@@ -642,7 +662,7 @@ def _apply_incoming(
             own_marks[parse_coordinate(cell)] = "sunk"
 
 
-def _format_shot_feedback(report: ShotReport, *, outgoing: bool) -> str:
+def format_shot_feedback(report: ShotReport, *, outgoing: bool) -> str:
     cell = report.coordinate
     if outgoing:
         if report.result == "miss":
