@@ -33,7 +33,7 @@ class QuitRequested(Exception):
     """Player asked to leave the Match (Ctrl+C)."""
 
 
-def _apply_placement_key(
+def apply_placement_key(
     key: Key,
     placement: Placement,
     selected: str | None,
@@ -41,7 +41,7 @@ def _apply_placement_key(
     factory: Callable[[], Placement],
     arm: QuitArm | None,
 ) -> tuple[Placement, str | None, _PlacementAction, str | None]:
-    """Pure per-key Placement transition shared by the sync and async drivers.
+    """Pure per-key Placement transition shared by drivers and the Textual screen.
 
     Returns the next ``placement`` and ``selected``, the control ``action``, and
     an optional status ``message`` to emit.
@@ -124,7 +124,7 @@ def run_placement(
 
     def step(key: object) -> Placement | None:
         nonlocal placement, selected
-        placement, selected, action, message = _apply_placement_key(
+        placement, selected, action, message = apply_placement_key(
             key,  # type: ignore[arg-type]
             placement,
             selected,
@@ -204,7 +204,7 @@ async def run_placement_async(
 
     def step(key: object) -> Placement | None:
         nonlocal placement, selected
-        placement, selected, action, message = _apply_placement_key(
+        placement, selected, action, message = apply_placement_key(
             key,  # type: ignore[arg-type]
             placement,
             selected,

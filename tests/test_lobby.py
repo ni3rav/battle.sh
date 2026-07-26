@@ -16,7 +16,7 @@ from battle_sh.ui.textual_app import (
     HostWaitingScreen,
     JoinScreen,
     OpeningScreen,
-    ReadyForPlacementScreen,
+    PlacementScreen,
 )
 
 
@@ -138,8 +138,8 @@ async def test_join_rejected_invite_shows_error_with_back() -> None:
 
 
 @pytest.mark.asyncio
-async def test_host_and_guest_connect_via_in_app_lobby_to_ready_for_placement() -> None:
-    """Session/Relay seam: opening → Host/Join → Ready for Placement on both sides."""
+async def test_host_and_guest_connect_via_in_app_lobby_to_placement() -> None:
+    """Session/Relay seam: opening → Host/Join → Placement on both sides."""
     async with start_relay() as relay_url:
         host_app = _app(relay_url)
         guest_app = _app(relay_url)
@@ -158,13 +158,13 @@ async def test_host_and_guest_connect_via_in_app_lobby_to_ready_for_placement() 
                 await guest_pilot.press("enter")
                 await _wait_until(
                     guest_pilot,
-                    lambda: isinstance(guest_app.screen, ReadyForPlacementScreen),
+                    lambda: isinstance(guest_app.screen, PlacementScreen),
                 )
                 await _wait_until(
                     host_pilot,
-                    lambda: isinstance(host_app.screen, ReadyForPlacementScreen),
+                    lambda: isinstance(host_app.screen, PlacementScreen),
                 )
-                assert isinstance(host_app.screen, ReadyForPlacementScreen)
-                assert isinstance(guest_app.screen, ReadyForPlacementScreen)
+                assert isinstance(host_app.screen, PlacementScreen)
+                assert isinstance(guest_app.screen, PlacementScreen)
                 assert host_app.screen.role == "host"
                 assert guest_app.screen.role == "guest"
