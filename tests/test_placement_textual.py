@@ -64,7 +64,8 @@ async def test_placement_screen_has_three_bands_and_placement_controls() -> None
                 controls = screen.controls_text()
                 assert "→ select ship" in controls
                 assert "→ lock" in controls
-                assert "`y`" in controls
+                assert "y" in controls.lower()
+                assert "`y`" not in controls
                 assert "→ quit" in controls
                 assert "fire" not in controls.lower()
                 assert screen.status_text() is not None
