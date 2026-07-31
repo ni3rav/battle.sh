@@ -9,7 +9,14 @@ from rich.console import Console
 from textual.widgets import Static
 
 from battle_sh.ui.clock import FakeClock
-from battle_sh.ui.textual_app import BRAND_TITLE, BattleShApp, ThemeScreen
+from battle_sh.ui.textual_app import (
+    BANNER,
+    BANNER_MIN_WIDTH,
+    BRAND_TITLE,
+    BattleShApp,
+    ThemeScreen,
+    brand_renderable,
+)
 
 
 def _app(clock: FakeClock | None = None) -> BattleShApp:
@@ -22,6 +29,29 @@ def _app(clock: FakeClock | None = None) -> BattleShApp:
 
 def test_brand_title_is_short_centered_name() -> None:
     assert BRAND_TITLE == "battle.sh"
+
+
+def test_brand_block_is_title_on_narrow_and_glyph_on_wide() -> None:
+    narrow = brand_renderable(width=BANNER_MIN_WIDTH - 1)
+    wide = brand_renderable(width=BANNER_MIN_WIDTH)
+    assert str(narrow) == BRAND_TITLE
+    assert "Terminal" not in str(narrow)
+    assert str(wide) == BANNER
+    assert "░██" in str(wide)
+
+
+@pytest.mark.asyncio
+async def test_opening_brand_follows_terminal_width() -> None:
+    app = _app()
+    async with app.run_test(size=(60, 24)) as pilot:
+        await pilot.pause()
+        brand = str(app.screen.query_one("#brand", Static).content)
+        assert brand == BRAND_TITLE
+    app2 = _app()
+    async with app2.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        brand = str(app2.screen.query_one("#brand", Static).content)
+        assert brand == BANNER
 
 
 @pytest.mark.asyncio

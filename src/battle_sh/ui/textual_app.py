@@ -64,12 +64,19 @@ from battle_sh.ui.ship_tables import ship_table_renderable
 from battle_sh.ui.sigint import install_sigint, uninstall_sigint
 from battle_sh.ui.theme_config import DEFAULT_THEME, load_theme_name, save_theme_name
 
-# Short centered brand (replaces the old wide ASCII banner).
+# ASCII glyph for wide terminals; narrow terminals show BRAND_TITLE only.
+BANNER = (
+    "░██                      ░██       ░██    ░██                           ░██        \n"
+    "░██                      ░██       ░██    ░██                           ░██        \n"
+    "░████████   ░██████   ░████████ ░████████ ░██  ░███████       ░███████  ░████████  \n"
+    "░██    ░██       ░██     ░██       ░██    ░██ ░██    ░██     ░██        ░██    ░██ \n"
+    "░██    ░██  ░███████     ░██       ░██    ░██ ░█████████      ░███████  ░██    ░██ \n"
+    "░███   ░██ ░██   ░██     ░██       ░██    ░██ ░██                   ░██ ░██    ░██ \n"
+    "░██░█████   ░█████░██     ░████     ░████ ░██  ░███████  ░██  ░███████  ░██    ░██ "
+)
 BRAND_TITLE = "battle.sh"
-BRAND_TAGLINE = "Terminal Battleship over a WebSocket Relay"
-
-# Back-compat alias for imports that still expect BANNER.
-BANNER = BRAND_TITLE
+# Banner lines are ~88 cols; require a little padding so centering still fits.
+BANNER_MIN_WIDTH = 92
 
 OPTION_HOST = "host"
 OPTION_JOIN = "join"
@@ -102,10 +109,11 @@ def _app_palette(app: App[None]) -> BoardPalette:
     )
 
 
-def _brand_block() -> Text:
-    return Text.from_markup(
-        f"[bold]{BRAND_TITLE}[/]\n[dim]{BRAND_TAGLINE}[/]"
-    )
+def brand_renderable(*, width: int) -> Text:
+    """Wide terminals get the ASCII glyph; narrow ones get just ``battle.sh``."""
+    if width >= BANNER_MIN_WIDTH:
+        return Text(BANNER)
+    return Text(BRAND_TITLE, style="bold")
 
 
 class OpeningScreen(Screen[None]):
@@ -116,21 +124,23 @@ class OpeningScreen(Screen[None]):
         align: center middle;
     }
     #opening {
-        width: 56;
+        width: auto;
+        max-width: 100%;
         height: auto;
         padding: 1 2;
     }
     #brand {
         text-align: center;
         width: 100%;
+        height: auto;
         padding-bottom: 1;
     }
     #menu {
-        width: 100%;
+        width: 56;
         height: auto;
     }
     #status {
-        width: 100%;
+        width: 56;
         height: 2;
         padding-top: 1;
     }
@@ -138,7 +148,7 @@ class OpeningScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="opening"):
-            yield Static(_brand_block(), id="brand")
+            yield Static(BRAND_TITLE, id="brand")
             yield Rule()
             yield OptionList(
                 Option("Host", id=OPTION_HOST),
@@ -151,7 +161,16 @@ class OpeningScreen(Screen[None]):
             yield Static("", id="status")
 
     def on_mount(self) -> None:
+        self._refresh_brand()
         self.query_one("#menu", OptionList).focus()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._refresh_brand()
+
+    def _refresh_brand(self) -> None:
+        self.query_one("#brand", Static).update(
+            brand_renderable(width=self.size.width)
+        )
 
     def set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message)
