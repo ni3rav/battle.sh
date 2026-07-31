@@ -96,6 +96,28 @@ SIDEBAR_CSS = """
     }
 """
 
+CENTERED_FRAME_CSS = """
+    .centered-frame {
+        width: 100%;
+        height: auto;
+        align-horizontal: center;
+    }
+    .centered-menu {
+        width: auto;
+        min-width: 24;
+        max-width: 100%;
+        height: auto;
+        text-align: center;
+        padding: 0 2;
+    }
+    .centered-menu > .option-list--option {
+        text-align: center;
+    }
+    .centered-menu:focus > .option-list--option-highlighted {
+        text-align: center;
+    }
+"""
+
 
 def _app_palette(app: App[None]) -> BoardPalette:
     theme = app.current_theme
@@ -119,15 +141,15 @@ def brand_renderable(*, width: int) -> Text:
 class OpeningScreen(Screen[None]):
     """Centered opening menu: Host, Join, Theme, Exit."""
 
-    DEFAULT_CSS = """
+    DEFAULT_CSS = CENTERED_FRAME_CSS + """
     OpeningScreen {
         align: center middle;
     }
     #opening {
-        width: auto;
-        max-width: 100%;
+        width: 100%;
         height: auto;
         padding: 1 2;
+        align-horizontal: center;
     }
     #brand {
         text-align: center;
@@ -135,14 +157,11 @@ class OpeningScreen(Screen[None]):
         height: auto;
         padding-bottom: 1;
     }
-    #menu {
-        width: 56;
-        height: auto;
-    }
     #status {
-        width: 56;
+        width: 100%;
         height: 2;
         padding-top: 1;
+        text-align: center;
     }
     """
 
@@ -156,6 +175,7 @@ class OpeningScreen(Screen[None]):
                 Option("Theme", id=OPTION_THEME),
                 Option("Exit", id=OPTION_EXIT),
                 id="menu",
+                classes="centered-menu",
             )
             yield Rule()
             yield Static("", id="status")
@@ -376,22 +396,19 @@ class HostWaitingScreen(Screen[None]):
         Binding("escape", "back", "Back", show=False),
     ]
 
-    DEFAULT_CSS = """
+    DEFAULT_CSS = CENTERED_FRAME_CSS + """
     HostWaitingScreen {
         align: center middle;
     }
     #host-waiting {
-        width: 64;
+        width: 100%;
         height: auto;
         padding: 1 2;
+        align-horizontal: center;
     }
     #headline, #invite, #body, #status {
         width: 100%;
         text-align: center;
-    }
-    #menu {
-        width: 100%;
-        height: auto;
     }
     """
 
@@ -412,7 +429,11 @@ class HostWaitingScreen(Screen[None]):
                 id="body",
             )
             yield Rule()
-            yield OptionList(Option("Back", id=OPTION_BACK), id="menu")
+            yield OptionList(
+                Option("Back", id=OPTION_BACK),
+                id="menu",
+                classes="centered-menu",
+            )
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -486,21 +507,24 @@ class JoinScreen(Screen[None]):
         Binding("escape", "back", "Back", show=False),
     ]
 
-    DEFAULT_CSS = """
+    DEFAULT_CSS = CENTERED_FRAME_CSS + """
     JoinScreen {
         align: center middle;
     }
     #join {
-        width: 64;
+        width: 100%;
         height: auto;
         padding: 1 2;
+        align-horizontal: center;
     }
     #headline, #status {
         width: 100%;
         text-align: center;
     }
-    #invite-input, #menu {
-        width: 100%;
+    #invite-input {
+        width: auto;
+        min-width: 32;
+        max-width: 56;
     }
     """
 
@@ -517,6 +541,7 @@ class JoinScreen(Screen[None]):
                 Option("Join", id=OPTION_SUBMIT_JOIN),
                 Option("Back", id=OPTION_BACK),
                 id="menu",
+                classes="centered-menu",
             )
             yield Rule()
             yield Static("", id="status")
@@ -1228,22 +1253,19 @@ class CombatScreen(Screen[None]):
 class MatchEndScreen(Screen[None]):
     """Outcome + match time with Lobby / Exit actions."""
 
-    DEFAULT_CSS = """
+    DEFAULT_CSS = CENTERED_FRAME_CSS + """
     MatchEndScreen {
         align: center middle;
     }
     #match-end {
-        width: 56;
+        width: 100%;
         height: auto;
         padding: 1 2;
+        align-horizontal: center;
     }
     #info, #body, #status {
         width: 100%;
         text-align: center;
-    }
-    #menu {
-        width: 100%;
-        height: auto;
     }
     """
 
@@ -1265,6 +1287,7 @@ class MatchEndScreen(Screen[None]):
                 Option("Lobby", id=OPTION_LOBBY),
                 Option("Exit", id=OPTION_EXIT),
                 id="menu",
+                classes="centered-menu",
             )
             yield Static("", id="status")
 

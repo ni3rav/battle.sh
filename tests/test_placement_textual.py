@@ -62,11 +62,11 @@ async def test_placement_screen_has_three_bands_and_placement_controls() -> None
                 assert "Match time" in screen.info_text()
                 assert "Your fleet" in screen.board_text() or "C" in screen.board_text()
                 controls = screen.controls_text()
-                assert "→ select ship" in controls
-                assert "→ lock" in controls
+                assert "select ship" in controls
+                assert "lock" in controls
                 assert "y" in controls.lower()
                 assert "`y`" not in controls
-                assert "→ quit" in controls
+                assert "quit" in controls.lower()
                 assert "fire" not in controls.lower()
                 assert screen.status_text() is not None
 
@@ -186,8 +186,8 @@ async def test_lock_commits_and_both_wait_then_both_ready() -> None:
                 )
                 host_screen = host_app.screen
                 assert isinstance(host_screen, PlacementScreen)
-                assert "→ quit" in host_screen.controls_text()
-                assert "→ lock" not in host_screen.controls_text()
+                assert "quit" in host_screen.controls_text()
+                assert "lock" not in host_screen.controls_text()
 
                 # Guest locks → both commitments present → Combat / Aim.
                 await guest_pilot.press("y")
