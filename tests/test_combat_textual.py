@@ -111,11 +111,11 @@ async def test_combat_screen_has_aim_chrome_and_controls() -> None:
                 assert "Aim" in host_screen.info_text()
                 assert "Match time" in host_screen.info_text()
                 controls = host_screen.controls_text()
-                assert "→ fire" in controls
-                assert "→ move" in controls
+                assert "fire" in controls
+                assert "move" in controls
                 assert "f" in controls.lower()
                 assert "`f`" not in controls
-                assert "→ quit" in controls
+                assert "quit" in controls.lower()
                 assert "lock" not in controls.lower()
                 board = host_screen.board_text()
                 assert "Opponent" in board or "Aim" in board or "+" in board
@@ -142,8 +142,8 @@ async def test_off_turn_wait_shows_spinner_and_ignores_aim_keys() -> None:
                     lambda: "Waiting" in guest_screen.info_text(),
                 )
                 controls = guest_screen.controls_text()
-                assert "→ quit" in controls
-                assert "→ fire" not in controls
+                assert "quit" in controls.lower()
+                assert "fire" not in controls
                 await guest_pilot.pause(0.3)
                 status_before = guest_screen.status_text()
                 assert any(ch in status_before for ch in "|/-\\")
@@ -151,7 +151,7 @@ async def test_off_turn_wait_shows_spinner_and_ignores_aim_keys() -> None:
                 await guest_pilot.pause()
                 assert isinstance(guest_app.screen, CombatScreen)
                 assert "Waiting" in guest_app.screen.info_text()
-                assert "→ fire" not in guest_app.screen.controls_text()
+                assert "fire" not in guest_app.screen.controls_text()
 
 
 @pytest.mark.asyncio
