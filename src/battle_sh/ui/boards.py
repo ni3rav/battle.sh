@@ -23,7 +23,7 @@ EMPTY_GLYPH = "·"
 MISS_GLYPH = "○"
 HIT_GLYPH = "●"
 SUNK_GLYPH = "■"
-AIM_GLYPH = "╋"
+AIM_GLYPH = "+"
 
 
 @dataclass(frozen=True)
