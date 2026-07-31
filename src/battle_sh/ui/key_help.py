@@ -25,36 +25,6 @@ AIM_KEYS: tuple[tuple[str, str], ...] = (
 
 WAIT_KEYS: tuple[tuple[str, str], ...] = (("Ctrl+C", "quit"),)
 
-OPENING_KEYS: tuple[tuple[str, str], ...] = (
-    ("Enter", "select"),
-    ("↑ ↓", "move"),
-    ("Ctrl+C", "quit"),
-)
-
-LOBBY_KEYS: tuple[tuple[str, str], ...] = (
-    ("Enter", "select"),
-    ("Esc", "back"),
-    ("Ctrl+C", "quit"),
-)
-
-JOIN_KEYS: tuple[tuple[str, str], ...] = (
-    ("Enter", "join / select"),
-    ("Esc", "back"),
-    ("Ctrl+C", "quit"),
-)
-
-MATCH_END_KEYS: tuple[tuple[str, str], ...] = (
-    ("Enter", "select"),
-    ("Ctrl+C", "quit"),
-)
-
-THEME_KEYS: tuple[tuple[str, str], ...] = (
-    ("↑ ↓", "browse"),
-    ("Enter", "apply"),
-    ("Esc", "back"),
-    ("Ctrl+C", "quit"),
-)
-
 
 def _kbd(label: str) -> Text:
     """Render a key chord like an HTML <kbd> chip (no backticks)."""

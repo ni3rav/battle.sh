@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from rich.console import Console
+from textual.widgets import Static
 
 from battle_sh.ui.clock import FakeClock
 from battle_sh.ui.textual_app import BRAND_TITLE, BattleShApp, ThemeScreen
@@ -50,6 +54,44 @@ async def test_theme_opens_picker_screen() -> None:
         await pilot.press("down", "down", "enter")  # Theme
         await pilot.pause()
         assert isinstance(app.screen, ThemeScreen)
+
+
+@pytest.mark.asyncio
+async def test_theme_preview_applies_live_while_browsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    app = BattleShApp(
+        relay_url="ws://127.0.0.1:8765",
+        grace_seconds=10.0,
+        clock=FakeClock(),
+        theme_name="textual-dark",
+    )
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("down", "down", "enter")  # Theme
+        await pilot.pause()
+        assert isinstance(app.screen, ThemeScreen)
+        start = app.theme
+        # Browse down until the live theme changes.
+        changed = False
+        for _ in range(8):
+            await pilot.press("down")
+            await pilot.pause()
+            if app.theme != start:
+                changed = True
+                break
+        assert changed, f"theme stayed at {start!r} while browsing"
+        content = app.screen.query_one("#theme-preview", Static).content
+        console = Console(record=True, width=80, force_terminal=True)
+        console.print(content)  # type: ignore[arg-type]
+        preview = console.export_text()
+        assert "Preview" in preview
+        assert app.theme in preview
+        # Esc restores the previously saved theme.
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.theme == "textual-dark"
 
 
 @pytest.mark.asyncio

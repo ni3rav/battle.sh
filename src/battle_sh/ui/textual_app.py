@@ -50,12 +50,7 @@ from battle_sh.ui.combat import (
 )
 from battle_sh.ui.key_help import (
     AIM_KEYS,
-    JOIN_KEYS,
-    LOBBY_KEYS,
-    MATCH_END_KEYS,
-    OPENING_KEYS,
     PLACEMENT_KEYS,
-    THEME_KEYS,
     WAIT_KEYS,
     keys_table_renderable,
     stacked_sidebar,
@@ -134,10 +129,6 @@ class OpeningScreen(Screen[None]):
         width: 100%;
         height: auto;
     }
-    #keys {
-        width: 100%;
-        padding-top: 1;
-    }
     #status {
         width: 100%;
         height: 2;
@@ -157,7 +148,6 @@ class OpeningScreen(Screen[None]):
                 id="menu",
             )
             yield Rule()
-            yield Static(keys_table_renderable(OPENING_KEYS, title="Keys"), id="keys")
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -213,10 +203,6 @@ class ThemeScreen(Screen[None]):
         width: 1fr;
         padding: 0 1;
     }
-    #theme-keys {
-        height: 8;
-        padding: 0 1;
-    }
     #status {
         height: 2;
         padding: 0 1;
@@ -227,6 +213,7 @@ class ThemeScreen(Screen[None]):
         super().__init__()
         self._saved_theme = DEFAULT_THEME
         self._previewing: str | None = None
+        self._theme_signal_subscribed = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="theme"):
@@ -237,7 +224,6 @@ class ThemeScreen(Screen[None]):
                 with VerticalScroll(id="theme-preview-scroll"):
                     yield Static("", id="theme-preview")
             yield Rule()
-            yield Static(keys_table_renderable(THEME_KEYS, title="Keys"), id="theme-keys")
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -250,7 +236,21 @@ class ThemeScreen(Screen[None]):
         if self._saved_theme in names:
             option_list.highlighted = names.index(self._saved_theme)
         option_list.focus()
-        self._apply_preview(self._saved_theme)
+        # Re-render the mock Combat preview whenever Textual finishes applying
+        # theme CSS variables so board colors track the live chrome.
+        app.theme_changed_signal.subscribe(
+            self, self._on_theme_changed, immediate=True
+        )
+        self._theme_signal_subscribed = True
+        self._apply_preview(self._saved_theme, force=True)
+        self.set_status(f"Previewing: {app.theme}  ·  Enter to save · Esc to cancel")
+
+    def on_unmount(self) -> None:
+        if not self._theme_signal_subscribed:
+            return
+        with contextlib.suppress(Exception):
+            _battle_app(self).theme_changed_signal.unsubscribe(self)
+        self._theme_signal_subscribed = False
 
     def set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message)
@@ -282,14 +282,27 @@ class ThemeScreen(Screen[None]):
         app.theme = self._saved_theme
         app.pop_screen()
 
-    def _apply_preview(self, theme_name: str) -> None:
+    def _on_theme_changed(self, theme: object) -> None:
+        """Textual finished switching themes — refresh board palette preview."""
+        name = getattr(theme, "name", None)
+        if isinstance(name, str) and name:
+            self._previewing = name
+        self._refresh_preview_content()
+        self.refresh()
+
+    def _apply_preview(self, theme_name: str, *, force: bool = False) -> None:
         app = _battle_app(self)
         if theme_name not in app.available_themes:
             return
-        if self._previewing == theme_name:
+        if not force and self._previewing == theme_name and app.theme == theme_name:
             return
         self._previewing = theme_name
+        # Apply immediately so OptionList/chrome restyle as the user browses.
         app.theme = theme_name
+        self._refresh_preview_content()
+        self.set_status(f"Previewing: {theme_name}  ·  Enter to save · Esc to cancel")
+
+    def _refresh_preview_content(self) -> None:
         self.query_one("#theme-preview", Static).update(self._preview_renderable())
 
     def _preview_renderable(self) -> Group:
@@ -353,7 +366,7 @@ class HostWaitingScreen(Screen[None]):
         height: auto;
         padding: 1 2;
     }
-    #headline, #invite, #body, #keys, #status {
+    #headline, #invite, #body, #status {
         width: 100%;
         text-align: center;
     }
@@ -381,7 +394,6 @@ class HostWaitingScreen(Screen[None]):
             )
             yield Rule()
             yield OptionList(Option("Back", id=OPTION_BACK), id="menu")
-            yield Static(keys_table_renderable(LOBBY_KEYS, title="Keys"), id="keys")
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -464,7 +476,7 @@ class JoinScreen(Screen[None]):
         height: auto;
         padding: 1 2;
     }
-    #headline, #keys, #status {
+    #headline, #status {
         width: 100%;
         text-align: center;
     }
@@ -488,7 +500,6 @@ class JoinScreen(Screen[None]):
                 id="menu",
             )
             yield Rule()
-            yield Static(keys_table_renderable(JOIN_KEYS, title="Keys"), id="keys")
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -1207,7 +1218,7 @@ class MatchEndScreen(Screen[None]):
         height: auto;
         padding: 1 2;
     }
-    #info, #body, #keys, #status {
+    #info, #body, #status {
         width: 100%;
         text-align: center;
     }
@@ -1236,7 +1247,6 @@ class MatchEndScreen(Screen[None]):
                 Option("Exit", id=OPTION_EXIT),
                 id="menu",
             )
-            yield Static(keys_table_renderable(MATCH_END_KEYS, title="Keys"), id="keys")
             yield Static("", id="status")
 
     def on_mount(self) -> None:
