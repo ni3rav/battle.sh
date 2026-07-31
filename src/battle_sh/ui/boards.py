@@ -1,6 +1,8 @@
-"""rich Board and Tracking Board rendering (color-coded hit/miss/sunk)."""
+"""rich Board and Tracking Board rendering (theme-aware glyphs)."""
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from battle_sh.rules.board import ShotResultKind
 from battle_sh.rules.placement import COLUMNS, ROWS, Coordinate, Placement
@@ -17,37 +19,85 @@ SHIP_GLYPH: dict[str, str] = {
     "Destroyer": "D",
 }
 
+EMPTY_GLYPH = "·"
+MISS_GLYPH = "○"
+HIT_GLYPH = "●"
+SUNK_GLYPH = "■"
+AIM_GLYPH = "╋"
 
-def board_legend(*, show_ships: bool = True) -> Text:
+
+@dataclass(frozen=True)
+class BoardPalette:
+    """Rich style strings for board cells (usually hex from a Textual Theme)."""
+
+    empty: str = "dim"
+    ship: str = "bold #4EBF71"
+    selected: str = "bold #ffa62b"
+    miss: str = "bold #0178D4"
+    hit: str = "bold #ba3c5b"
+    sunk: str = "bold #ffa62b"
+    aim: str = "bold reverse #ffa62b"
+
+
+DEFAULT_PALETTE = BoardPalette()
+
+
+def palette_from_colors(
+    *,
+    primary: str,
+    success: str,
+    error: str,
+    warning: str,
+    accent: str,
+    foreground: str | None = None,
+) -> BoardPalette:
+    """Build a BoardPalette from Textual Theme color tokens."""
+    muted = f"dim {foreground}" if foreground else "dim"
+    return BoardPalette(
+        empty=muted,
+        ship=f"bold {success}",
+        selected=f"bold {accent}",
+        miss=f"bold {primary}",
+        hit=f"bold {error}",
+        sunk=f"bold {warning}",
+        aim=f"bold reverse {accent}",
+    )
+
+
+def board_legend(*, show_ships: bool = True, palette: BoardPalette = DEFAULT_PALETTE) -> Text:
     parts: list[str] = []
     if show_ships:
-        parts.append("[bold green]C B R S D[/] ships")
-        parts.append("[bold yellow]yellow[/] selected")
+        parts.append(f"[{palette.ship}]C B R S D[/] ships")
+        parts.append(f"[{palette.selected}]selected[/]")
     parts.extend(
         [
-            "[dim].[/] empty",
-            "[bold blue]o[/] miss",
-            "[bold red]X[/] hit",
-            "[bold magenta]X[/] sunk",
+            f"[{palette.empty}]{EMPTY_GLYPH}[/] empty",
+            f"[{palette.miss}]{MISS_GLYPH}[/] miss",
+            f"[{palette.hit}]{HIT_GLYPH}[/] hit",
+            f"[{palette.sunk}]{SUNK_GLYPH}[/] sunk",
         ]
     )
     return Text.from_markup("  ".join(parts))
 
 
 def _mark_style(
-    kind: ShotResultKind | None, *, ship: bool, selected: bool = False
+    kind: ShotResultKind | None,
+    *,
+    ship: bool,
+    selected: bool = False,
+    palette: BoardPalette,
 ) -> str:
     if kind == "miss":
-        return "bold blue"
+        return palette.miss
     if kind == "hit":
-        return "bold red"
+        return palette.hit
     if kind == "sunk":
-        return "bold magenta"
+        return palette.sunk
     if selected:
-        return "bold yellow"
+        return palette.selected
     if ship:
-        return "bold green"
-    return "dim"
+        return palette.ship
+    return palette.empty
 
 
 def _cell_glyph(
@@ -58,27 +108,31 @@ def _cell_glyph(
     show_ships: bool,
     selected: str | None,
     aim: Coordinate | None = None,
+    palette: BoardPalette = DEFAULT_PALETTE,
 ) -> Text:
     kind = marks.get(coord)
     ship_name = ship_at.get(coord)
     is_aim = aim is not None and coord == aim
     if kind == "miss":
-        glyph = "o"
-    elif kind in ("hit", "sunk"):
-        glyph = "X"
+        glyph = MISS_GLYPH
+    elif kind == "hit":
+        glyph = HIT_GLYPH
+    elif kind == "sunk":
+        glyph = SUNK_GLYPH
     elif show_ships and ship_name is not None:
         glyph = SHIP_GLYPH.get(ship_name, "#")
     elif is_aim:
-        glyph = "+"
+        glyph = AIM_GLYPH
     else:
-        glyph = "."
+        glyph = EMPTY_GLYPH
     if is_aim:
-        style = "bold reverse yellow"
+        style = palette.aim
     else:
         style = _mark_style(
             kind,
             ship=show_ships and ship_name is not None,
             selected=selected is not None and ship_name == selected,
+            palette=palette,
         )
     return Text(glyph, style=style)
 
@@ -91,6 +145,7 @@ def render_board(
     show_ships: bool,
     selected: str | None = None,
     aim: Coordinate | None = None,
+    palette: BoardPalette = DEFAULT_PALETTE,
 ) -> Table:
     table = Table(title=title, show_header=True, box=None, pad_edge=False)
     table.add_column(" ", justify="right")
@@ -105,6 +160,7 @@ def render_board(
                 show_ships=show_ships,
                 selected=selected,
                 aim=aim,
+                palette=palette,
             )
             for col in COLUMNS
         ]
@@ -123,6 +179,7 @@ def own_board_renderable(
     marks: dict[Coordinate, ShotResultKind],
     *,
     selected: str | None = None,
+    palette: BoardPalette = DEFAULT_PALETTE,
 ) -> Table:
     return render_board(
         "Your fleet",
@@ -130,6 +187,7 @@ def own_board_renderable(
         marks=marks,
         show_ships=True,
         selected=selected,
+        palette=palette,
     )
 
 
@@ -138,6 +196,7 @@ def tracking_board_renderable(
     revealed: frozenset[Coordinate],
     *,
     aim: Coordinate | None = None,
+    palette: BoardPalette = DEFAULT_PALETTE,
 ) -> Table:
     # Revealed sunk cells are known occupied, but Ship names are not shown here.
     ship_at = {cell: "sunk" for cell in revealed}
@@ -148,6 +207,7 @@ def tracking_board_renderable(
         marks=marks,
         show_ships=True,
         aim=aim,
+        palette=palette,
     )
 
 
@@ -157,11 +217,13 @@ def render_match_boards(
     own_marks: dict[Coordinate, ShotResultKind],
     tracking_marks: dict[Coordinate, ShotResultKind],
     revealed: frozenset[Coordinate],
+    *,
+    palette: BoardPalette = DEFAULT_PALETTE,
 ) -> None:
     group: RenderableType = Group(
-        own_board_renderable(placement, own_marks),
-        board_legend(show_ships=True),
+        own_board_renderable(placement, own_marks, palette=palette),
+        board_legend(show_ships=True, palette=palette),
         Text(""),
-        tracking_board_renderable(tracking_marks, revealed),
+        tracking_board_renderable(tracking_marks, revealed, palette=palette),
     )
     console.print(group)

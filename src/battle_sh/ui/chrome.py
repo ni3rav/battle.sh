@@ -1,4 +1,4 @@
-"""Match UI chrome: controls copy, connection line, scoreboard renderables."""
+"""Match UI chrome: connection line, scoreboard renderables, spinner."""
 
 from __future__ import annotations
 
@@ -8,50 +8,17 @@ from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-PLACEMENT_CONTROLS = """\
-[bold]Placement[/]
+# Kept for callers/tests that still import legacy control markup names.
+from battle_sh.ui.key_help import (  # noqa: F401
+    AIM_KEYS,
+    PLACEMENT_KEYS,
+    WAIT_KEYS,
+    keys_plain_text,
+)
 
-  [bold]`1`-`5`[/]
-  → select ship
-
-  [bold]`tab` / `shift+tab`[/]
-  → cycle
-
-  [bold]`w`/`a`/`s`/`d` / arrows[/]
-  → move
-
-  [bold]`e` / `r`[/]
-  → flip H↔V
-
-  [bold]`t`[/]
-  → new random
-
-  [bold]`y`[/]
-  → lock
-
-  [bold]`Ctrl+C`[/]
-  → quit
-"""
-
-AIM_CONTROLS = """\
-[bold]Aim[/]
-
-  [bold]`w`/`a`/`s`/`d` / arrows[/]
-  → move
-
-  [bold]`f` / `Enter` / `Space`[/]
-  → fire
-
-  [bold]`Ctrl+C`[/]
-  → quit
-"""
-
-WAIT_CONTROLS = """\
-[bold]Waiting[/]
-
-  [bold]`Ctrl+C`[/]
-  → quit
-"""
+PLACEMENT_CONTROLS = keys_plain_text(PLACEMENT_KEYS)
+AIM_CONTROLS = keys_plain_text(AIM_KEYS)
+WAIT_CONTROLS = keys_plain_text(WAIT_KEYS)
 
 SPINNER = ("|", "/", "-", "\\")
 

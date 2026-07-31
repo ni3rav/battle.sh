@@ -1,22 +1,11 @@
-"""Opening screen: banner, Host/Join/Exit, Exit quit, QuitArm, q never quits."""
+"""Opening screen: brand title, Host/Join/Theme/Exit, QuitArm, q never quits."""
 
 from __future__ import annotations
 
 import pytest
 
 from battle_sh.ui.clock import FakeClock
-from battle_sh.ui.textual_app import BANNER, BattleShApp
-
-# Independent copy of the #20 Further Notes banner (glyph layout).
-EXPECTED_BANNER = (
-    '░██                      ░██       ░██    ░██                           ░██        \n'
-    '░██                      ░██       ░██    ░██                           ░██        \n'
-    '░████████   ░██████   ░████████ ░████████ ░██  ░███████       ░███████  ░████████  \n'
-    '░██    ░██       ░██     ░██       ░██    ░██ ░██    ░██     ░██        ░██    ░██ \n'
-    '░██    ░██  ░███████     ░██       ░██    ░██ ░█████████      ░███████  ░██    ░██ \n'
-    '░███   ░██ ░██   ░██     ░██       ░██    ░██ ░██                   ░██ ░██    ░██ \n'
-    '░██░█████   ░█████░██     ░████     ░████ ░██  ░███████  ░██  ░███████  ░██    ░██ '
-)
+from battle_sh.ui.textual_app import BRAND_TITLE, BattleShApp, ThemeScreen
 
 
 def _app(clock: FakeClock | None = None) -> BattleShApp:
@@ -27,18 +16,18 @@ def _app(clock: FakeClock | None = None) -> BattleShApp:
     )
 
 
-def test_banner_matches_issue_glyph_layout() -> None:
-    assert BANNER == EXPECTED_BANNER
+def test_brand_title_is_short_centered_name() -> None:
+    assert BRAND_TITLE == "battle.sh"
 
 
 @pytest.mark.asyncio
 async def test_opening_menu_exit_via_keys() -> None:
-    """Opening lists Host / Join / Exit; Exit leaves. Host/Join covered in test_lobby."""
+    """Opening lists Host / Join / Theme / Exit; Exit leaves."""
     app = _app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        # Skip Host and Join (they navigate away); Exit is third.
-        await pilot.press("down", "down", "enter")
+        # Exit is fourth.
+        await pilot.press("down", "down", "down", "enter")
         await pilot.pause()
     assert not app.is_running
 
@@ -48,9 +37,19 @@ async def test_exit_leaves_the_app() -> None:
     app = _app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("down", "down", "enter")
+        await pilot.press("down", "down", "down", "enter")
         await pilot.pause()
     assert not app.is_running
+
+
+@pytest.mark.asyncio
+async def test_theme_opens_picker_screen() -> None:
+    app = _app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("down", "down", "enter")  # Theme
+        await pilot.pause()
+        assert isinstance(app.screen, ThemeScreen)
 
 
 @pytest.mark.asyncio

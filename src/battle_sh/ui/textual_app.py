@@ -1,4 +1,4 @@
-"""Textual player app: opening, Host/Join lobby, Placement, Combat, QuitArm."""
+"""Textual player app: opening, themes, Host/Join lobby, Placement, Combat, QuitArm."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, OptionList, Rule, Static
 from textual.widgets.option_list import Option
 from textual.worker import Worker, WorkerCancelled, WorkerState
 
@@ -30,15 +30,16 @@ from battle_sh.networking.protocol import MatchOutcome, Role
 from battle_sh.rules.board import ShotResultKind, parse_coordinate
 from battle_sh.rules.placement import Coordinate, Placement, random_placement
 from battle_sh.ui.aim_flow import apply_aim_key, initial_aim
-from battle_sh.ui.boards import own_board_renderable, tracking_board_renderable
+from battle_sh.ui.boards import (
+    BoardPalette,
+    own_board_renderable,
+    palette_from_colors,
+    tracking_board_renderable,
+)
 from battle_sh.ui.chrome import (
-    AIM_CONTROLS,
-    PLACEMENT_CONTROLS,
     SPINNER,
-    WAIT_CONTROLS,
     MatchStatus,
     connection_line,
-    sidebar_scoreboard_renderable,
 )
 from battle_sh.ui.clock import Clock, SystemClock, format_elapsed
 from battle_sh.ui.combat import (
@@ -47,43 +48,116 @@ from battle_sh.ui.combat import (
     combat_match_status,
     format_shot_feedback,
 )
+from battle_sh.ui.key_help import (
+    AIM_KEYS,
+    JOIN_KEYS,
+    LOBBY_KEYS,
+    MATCH_END_KEYS,
+    OPENING_KEYS,
+    PLACEMENT_KEYS,
+    THEME_KEYS,
+    WAIT_KEYS,
+    keys_table_renderable,
+    stacked_sidebar,
+)
 from battle_sh.ui.keys import Key
+from battle_sh.ui.match_end_copy import match_end_detail, match_end_headline
 from battle_sh.ui.placement_flow import apply_placement_key
 from battle_sh.ui.quit_arm import QUIT_WARN, QuitArm
+from battle_sh.ui.ship_progress import enemy_ship_rows, your_ship_rows
+from battle_sh.ui.ship_tables import ship_table_renderable
 from battle_sh.ui.sigint import install_sigint, uninstall_sigint
+from battle_sh.ui.theme_config import DEFAULT_THEME, load_theme_name, save_theme_name
 
-BANNER = (
-    "░██                      ░██       ░██    ░██                           ░██        \n"
-    "░██                      ░██       ░██    ░██                           ░██        \n"
-    "░████████   ░██████   ░████████ ░████████ ░██  ░███████       ░███████  ░████████  \n"
-    "░██    ░██       ░██     ░██       ░██    ░██ ░██    ░██     ░██        ░██    ░██ \n"
-    "░██    ░██  ░███████     ░██       ░██    ░██ ░█████████      ░███████  ░██    ░██ \n"
-    "░███   ░██ ░██   ░██     ░██       ░██    ░██ ░██                   ░██ ░██    ░██ \n"
-    "░██░█████   ░█████░██     ░████     ░████ ░██  ░███████  ░██  ░███████  ░██    ░██ "
-)
+# Short centered brand (replaces the old wide ASCII banner).
+BRAND_TITLE = "battle.sh"
+BRAND_TAGLINE = "Terminal Battleship over a WebSocket Relay"
+
+# Back-compat alias for imports that still expect BANNER.
+BANNER = BRAND_TITLE
 
 OPTION_HOST = "host"
 OPTION_JOIN = "join"
+OPTION_THEME = "theme"
 OPTION_EXIT = "exit"
 OPTION_BACK = "back"
 OPTION_SUBMIT_JOIN = "submit_join"
+OPTION_LOBBY = "lobby"
 
 _PlacementPhase = Literal["editing", "waiting"]
 _CombatPhase = Literal["aiming", "waiting"]
 
+SIDEBAR_CSS = """
+    #sidebar {
+        width: 44;
+        padding: 0 1;
+    }
+"""
+
+
+def _app_palette(app: App[None]) -> BoardPalette:
+    theme = app.current_theme
+    return palette_from_colors(
+        primary=theme.primary or "#0178D4",
+        success=theme.success or "#4EBF71",
+        error=theme.error or "#ba3c5b",
+        warning=theme.warning or "#ffa62b",
+        accent=theme.accent or "#ffa62b",
+        foreground=theme.foreground,
+    )
+
+
+def _brand_block() -> Text:
+    return Text.from_markup(
+        f"[bold]{BRAND_TITLE}[/]\n[dim]{BRAND_TAGLINE}[/]"
+    )
+
 
 class OpeningScreen(Screen[None]):
-    """ASCII-branded opening menu: Host, Join, Exit."""
+    """Centered opening menu: Host, Join, Theme, Exit."""
+
+    DEFAULT_CSS = """
+    OpeningScreen {
+        align: center middle;
+    }
+    #opening {
+        width: 56;
+        height: auto;
+        padding: 1 2;
+    }
+    #brand {
+        text-align: center;
+        width: 100%;
+        padding-bottom: 1;
+    }
+    #menu {
+        width: 100%;
+        height: auto;
+    }
+    #keys {
+        width: 100%;
+        padding-top: 1;
+    }
+    #status {
+        width: 100%;
+        height: 2;
+        padding-top: 1;
+    }
+    """
 
     def compose(self) -> ComposeResult:
         with Vertical(id="opening"):
-            yield Static(BANNER, id="banner")
+            yield Static(_brand_block(), id="brand")
+            yield Rule()
             yield OptionList(
                 Option("Host", id=OPTION_HOST),
                 Option("Join", id=OPTION_JOIN),
+                Option("Theme", id=OPTION_THEME),
                 Option("Exit", id=OPTION_EXIT),
                 id="menu",
             )
+            yield Rule()
+            yield Static(keys_table_renderable(OPENING_KEYS, title="Keys"), id="keys")
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -106,6 +180,161 @@ class OpeningScreen(Screen[None]):
         if option_id == OPTION_JOIN:
             app.push_screen(JoinScreen())
             return
+        if option_id == OPTION_THEME:
+            app.push_screen(ThemeScreen())
+            return
+
+
+class ThemeScreen(Screen[None]):
+    """Ghostty-style theme picker: list left, live Combat mock preview right."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    ThemeScreen {
+        layout: vertical;
+    }
+    #theme-headline {
+        height: 3;
+        padding: 0 1;
+        text-align: center;
+    }
+    #theme-body {
+        height: 1fr;
+        layout: horizontal;
+    }
+    #theme-list {
+        width: 28;
+        padding: 0 1;
+    }
+    #theme-preview {
+        width: 1fr;
+        padding: 0 1;
+    }
+    #theme-keys {
+        height: 8;
+        padding: 0 1;
+    }
+    #status {
+        height: 2;
+        padding: 0 1;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._saved_theme = DEFAULT_THEME
+        self._previewing: str | None = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="theme"):
+            yield Static("Theme · browse and preview", id="theme-headline")
+            yield Rule()
+            with Horizontal(id="theme-body"):
+                yield OptionList(id="theme-list")
+                with VerticalScroll(id="theme-preview-scroll"):
+                    yield Static("", id="theme-preview")
+            yield Rule()
+            yield Static(keys_table_renderable(THEME_KEYS, title="Keys"), id="theme-keys")
+            yield Static("", id="status")
+
+    def on_mount(self) -> None:
+        app = _battle_app(self)
+        self._saved_theme = app.theme
+        names = sorted(app.available_themes)
+        option_list = self.query_one("#theme-list", OptionList)
+        for name in names:
+            option_list.add_option(Option(name, id=name))
+        if self._saved_theme in names:
+            option_list.highlighted = names.index(self._saved_theme)
+        option_list.focus()
+        self._apply_preview(self._saved_theme)
+
+    def set_status(self, message: str) -> None:
+        self.query_one("#status", Static).update(message)
+
+    def on_option_list_option_highlighted(
+        self, event: OptionList.OptionHighlighted
+    ) -> None:
+        theme_id = event.option.id
+        if theme_id is None:
+            return
+        self._apply_preview(str(theme_id))
+
+    def on_option_list_option_selected(
+        self, event: OptionList.OptionSelected
+    ) -> None:
+        theme_id = event.option.id
+        if theme_id is None:
+            return
+        name = str(theme_id)
+        app = _battle_app(self)
+        app.theme = name
+        save_theme_name(name)
+        self._saved_theme = name
+        self.set_status(f"Theme saved: {name}")
+        _battle_app(self).pop_screen()
+
+    def action_back(self) -> None:
+        app = _battle_app(self)
+        app.theme = self._saved_theme
+        app.pop_screen()
+
+    def _apply_preview(self, theme_name: str) -> None:
+        app = _battle_app(self)
+        if theme_name not in app.available_themes:
+            return
+        if self._previewing == theme_name:
+            return
+        self._previewing = theme_name
+        app.theme = theme_name
+        self.query_one("#theme-preview", Static).update(self._preview_renderable())
+
+    def _preview_renderable(self) -> Group:
+        from battle_sh.rules.placement import coordinate
+
+        palette = _app_palette(_battle_app(self))
+        placement = Placement(
+            {
+                "Carrier": frozenset(coordinate(c, 1) for c in "ABCDE"),
+                "Battleship": frozenset(coordinate(c, 2) for c in "ABCD"),
+                "Cruiser": frozenset(coordinate(c, 3) for c in "ABC"),
+                "Submarine": frozenset(coordinate(c, 4) for c in "ABC"),
+                "Destroyer": frozenset(coordinate(c, 5) for c in "AB"),
+            }
+        )
+        own_marks: dict[Coordinate, ShotResultKind] = {
+            coordinate("A", 1): "hit",
+            coordinate("B", 5): "sunk",
+            coordinate("A", 5): "sunk",
+            coordinate("J", 10): "miss",
+        }
+        tracking: dict[Coordinate, ShotResultKind] = {
+            coordinate("C", 3): "hit",
+            coordinate("D", 7): "miss",
+            coordinate("A", 8): "sunk",
+            coordinate("B", 8): "sunk",
+        }
+        revealed = frozenset({coordinate("A", 8), coordinate("B", 8)})
+        your_rows = your_ship_rows(placement, own_marks)
+        enemy_rows = enemy_ship_rows(("Destroyer",))
+        return Group(
+            Text.from_markup(f"[bold]Preview[/] · {_battle_app(self).theme}"),
+            Text(""),
+            own_board_renderable(placement, own_marks, palette=palette),
+            Text(""),
+            tracking_board_renderable(
+                tracking, revealed, aim=coordinate("E", 5), palette=palette
+            ),
+            Text(""),
+            stacked_sidebar(
+                keys_table_renderable(AIM_KEYS, title="Keys"),
+                ship_table_renderable(your_rows, title="Your ships"),
+                ship_table_renderable(enemy_rows, title="Enemy ships"),
+            ),
+        )
 
 
 class HostWaitingScreen(Screen[None]):
@@ -114,6 +343,25 @@ class HostWaitingScreen(Screen[None]):
     BINDINGS = [
         Binding("escape", "back", "Back", show=False),
     ]
+
+    DEFAULT_CSS = """
+    HostWaitingScreen {
+        align: center middle;
+    }
+    #host-waiting {
+        width: 64;
+        height: auto;
+        padding: 1 2;
+    }
+    #headline, #invite, #body, #keys, #status {
+        width: 100%;
+        text-align: center;
+    }
+    #menu {
+        width: 100%;
+        height: auto;
+    }
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -124,13 +372,16 @@ class HostWaitingScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="host-waiting"):
             yield Static("Host · Lobby — waiting for Guest", id="headline")
+            yield Rule()
             yield Static("Creating Match…", id="invite")
             yield Static(
                 "Share the Invite with your opponent.\n"
                 "Match time starts when they join.",
                 id="body",
             )
+            yield Rule()
             yield OptionList(Option("Back", id=OPTION_BACK), id="menu")
+            yield Static(keys_table_renderable(LOBBY_KEYS, title="Keys"), id="keys")
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -204,6 +455,24 @@ class JoinScreen(Screen[None]):
         Binding("escape", "back", "Back", show=False),
     ]
 
+    DEFAULT_CSS = """
+    JoinScreen {
+        align: center middle;
+    }
+    #join {
+        width: 64;
+        height: auto;
+        padding: 1 2;
+    }
+    #headline, #keys, #status {
+        width: 100%;
+        text-align: center;
+    }
+    #invite-input, #menu {
+        width: 100%;
+    }
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self._conn: MatchConnection | None = None
@@ -211,12 +480,15 @@ class JoinScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="join"):
             yield Static("Join · paste Invite", id="headline")
+            yield Rule()
             yield Input(placeholder="Invite phrase", id="invite-input")
             yield OptionList(
                 Option("Join", id=OPTION_SUBMIT_JOIN),
                 Option("Back", id=OPTION_BACK),
                 id="menu",
             )
+            yield Rule()
+            yield Static(keys_table_renderable(JOIN_KEYS, title="Keys"), id="keys")
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -300,31 +572,34 @@ class JoinScreen(Screen[None]):
 class PlacementScreen(Screen[None]):
     """Placement phase: three-band chrome, exact keys, lock → wait for opponent."""
 
-    # No Back / Escape — mid-Match Abandon is two-step Ctrl+C only.
-    DEFAULT_CSS = """
-    PlacementScreen {
+    DEFAULT_CSS = f"""
+    PlacementScreen {{
         layout: vertical;
-    }
-    #info {
+    }}
+    #info {{
         height: 3;
         padding: 0 1;
-    }
-    #middle {
+        text-align: center;
+    }}
+    #middle {{
         height: 1fr;
         layout: horizontal;
-    }
-    #board-panel {
+    }}
+    #board-panel {{
         width: 1fr;
         padding: 0 1;
-    }
-    #controls {
-        width: 34;
-        padding: 0 1;
-    }
-    #status {
+        align: center middle;
+    }}
+    #board {{
+        width: auto;
+        height: auto;
+    }}
+    {SIDEBAR_CSS}
+    #status {{
         height: 3;
         padding: 0 1;
-    }
+        text-align: center;
+    }}
     """
 
     def __init__(
@@ -353,6 +628,7 @@ class PlacementScreen(Screen[None]):
                 f"{label} · Placement · Match time 0:00",
                 id="info",
             )
+            yield Rule()
             with Horizontal(id="middle"):
                 with Vertical(id="board-panel"):
                     yield Static(
@@ -363,14 +639,17 @@ class PlacementScreen(Screen[None]):
                         "No ship selected — press 1-5 or tab.",
                         id="selected-line",
                     )
+                yield Rule(orientation="vertical")
                 yield Static(
-                    Text.from_markup(PLACEMENT_CONTROLS),
-                    id="controls",
+                    keys_table_renderable(PLACEMENT_KEYS, title="Keys"),
+                    id="sidebar",
                 )
+            yield Rule()
             yield Static(" ", id="status")
 
     def on_mount(self) -> None:
         self._refresh_info()
+        self._refresh_board()
         self.set_interval(0.25, self._on_tick)
         self._watch_worker = self.run_worker(
             self._watch_match_end(),
@@ -385,8 +664,8 @@ class PlacementScreen(Screen[None]):
         return str(self.query_one("#info", Static).content)
 
     def controls_text(self) -> str:
-        """Controls-band text currently shown."""
-        return str(self.query_one("#controls", Static).content)
+        """Sidebar text currently shown (kbd table)."""
+        return _static_plain(self.query_one("#sidebar", Static), width=48)
 
     def status_text(self) -> str:
         """Status-band text currently shown."""
@@ -401,6 +680,9 @@ class PlacementScreen(Screen[None]):
 
     def set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message or " ")
+
+    def _palette(self) -> BoardPalette:
+        return _app_palette(_battle_app(self))
 
     def _refresh_info(self) -> None:
         """Refresh the info band Match time (and wait spinner when waiting)."""
@@ -426,7 +708,9 @@ class PlacementScreen(Screen[None]):
 
     def _refresh_board(self) -> None:
         self.query_one("#board", Static).update(
-            own_board_renderable(self._placement, {}, selected=self._selected)
+            own_board_renderable(
+                self._placement, {}, selected=self._selected, palette=self._palette()
+            )
         )
         selected_line = (
             f"Selected: {self._selected}"
@@ -437,13 +721,14 @@ class PlacementScreen(Screen[None]):
 
     def _enter_waiting(self) -> None:
         self._phase = "waiting"
-        self.query_one("#controls", Static).update(Text.from_markup(WAIT_CONTROLS))
+        self.query_one("#sidebar", Static).update(
+            keys_table_renderable(WAIT_KEYS, title="Keys")
+        )
         self.set_status("Waiting for opponent to lock…")
         self._refresh_info()
 
     def on_key(self, event: events.Key) -> None:
         if self._phase == "waiting":
-            # Wait honors only Ctrl+C (app binding); ignore Placement/Aim keys.
             return
         if event.key in {"ctrl+c", "ctrl+q"}:
             return
@@ -453,7 +738,7 @@ class PlacementScreen(Screen[None]):
             self._placement,
             self._selected,
             factory=self._factory,
-            arm=None,  # Ctrl+C is handled by the app QuitArm binding
+            arm=None,
         )
         self._placement = placement
         self._selected = selected
@@ -471,8 +756,6 @@ class PlacementScreen(Screen[None]):
             )
 
     async def _lock_and_wait(self) -> None:
-        # Cancel Abandon watch; MatchConnection serializes wire reads so a
-        # lingering poll cannot steal the opponent's commitment from ``_recv``.
         if self._watch_worker is not None and self._watch_worker.state == WorkerState.RUNNING:
             self._watch_worker.cancel()
         self._watch_worker = None
@@ -480,7 +763,6 @@ class PlacementScreen(Screen[None]):
             await self.conn.lock_placement(self._placement)
         except (MatchConnectionError, OSError, ConnectionError) as exc:
             self.set_status(f"Could not lock Placement: {exc}")
-            # Stay in editing — resume watching for opponent Abandon.
             self._watch_worker = self.run_worker(
                 self._watch_match_end(),
                 name="placement_watch",
@@ -514,7 +796,6 @@ class PlacementScreen(Screen[None]):
         )
 
     async def _watch_match_end(self) -> None:
-        """While editing, notice an opponent Abandon without blocking keys."""
         try:
             while self._phase == "editing":
                 end = await self.conn.poll_incoming(timeout=0.05)
@@ -527,7 +808,6 @@ class PlacementScreen(Screen[None]):
             return
 
     async def confirm_quit(self) -> None:
-        """Confirmed two-step Ctrl+C: leave_match so the opponent Abandons now."""
         if self._watch_worker is not None and self._watch_worker.state == WorkerState.RUNNING:
             self._watch_worker.cancel()
         self._watch_worker = None
@@ -561,32 +841,36 @@ class PlacementScreen(Screen[None]):
 
 
 class CombatScreen(Screen[None]):
-    """Combat phase: Aim / off-turn wait, exact keys, boards + scoreboard."""
+    """Combat phase: Aim / off-turn wait, exact keys, boards + ship tables."""
 
-    DEFAULT_CSS = """
-    CombatScreen {
+    DEFAULT_CSS = f"""
+    CombatScreen {{
         layout: vertical;
-    }
-    #info {
+    }}
+    #info {{
         height: 4;
         padding: 0 1;
-    }
-    #middle {
+        text-align: center;
+    }}
+    #middle {{
         height: 1fr;
         layout: horizontal;
-    }
-    #board {
+    }}
+    #board-panel {{
         width: 1fr;
         padding: 0 1;
-    }
-    #controls {
-        width: 34;
-        padding: 0 1;
-    }
-    #status {
+        align: center middle;
+    }}
+    #board {{
+        width: auto;
+        height: auto;
+    }}
+    {SIDEBAR_CSS}
+    #status {{
         height: 3;
         padding: 0 1;
-    }
+        text-align: center;
+    }}
     """
 
     def __init__(
@@ -622,9 +906,13 @@ class CombatScreen(Screen[None]):
         label = "Host" if self.role == "host" else "Guest"
         with Vertical(id="combat"):
             yield Static(f"{label} · Aim · Match time 0:00", id="info")
+            yield Rule()
             with Horizontal(id="middle"):
-                yield Static("", id="board")
-                yield Static(Text.from_markup(AIM_CONTROLS), id="controls")
+                with Vertical(id="board-panel"):
+                    yield Static("", id="board")
+                yield Rule(orientation="vertical")
+                yield Static("", id="sidebar")
+            yield Rule()
             yield Static(" ", id="status")
 
     def on_mount(self) -> None:
@@ -642,7 +930,6 @@ class CombatScreen(Screen[None]):
             self._start_aim_watch()
 
     def _cancel_watch(self) -> None:
-        """Request cancel without awaiting (safe from sync key handlers)."""
         if self._watch_worker is not None and self._watch_worker.state == WorkerState.RUNNING:
             self._watch_worker.cancel()
         self._watch_worker = None
@@ -661,7 +948,7 @@ class CombatScreen(Screen[None]):
         return _static_plain(self.query_one("#info", Static), width=100)
 
     def controls_text(self) -> str:
-        return _static_plain(self.query_one("#controls", Static), width=40)
+        return _static_plain(self.query_one("#sidebar", Static), width=48)
 
     def status_text(self) -> str:
         return str(self.query_one("#status", Static).content)
@@ -697,6 +984,9 @@ class CombatScreen(Screen[None]):
             enemy_sunk_ships=self._enemy_sunk,
         )
 
+    def _palette(self) -> BoardPalette:
+        return _app_palette(_battle_app(self))
+
     def _refresh_all(self) -> None:
         self._refresh_info()
         self._refresh_board()
@@ -704,7 +994,6 @@ class CombatScreen(Screen[None]):
         self._refresh_status()
 
     def _refresh_status(self) -> None:
-        # Match combat_wait_frame: spinner lives on the status line while waiting.
         if self._phase == "waiting":
             spin = SPINNER[self._spin % len(SPINNER)]
             text = f"{spin} {self._status}" if self._status.strip() else spin
@@ -726,23 +1015,31 @@ class CombatScreen(Screen[None]):
 
     def _refresh_board(self) -> None:
         aim = self._aim if self._phase == "aiming" else None
+        palette = self._palette()
         self.query_one("#board", Static).update(
             Group(
-                own_board_renderable(self._placement, self._own_marks),
+                own_board_renderable(
+                    self._placement, self._own_marks, palette=palette
+                ),
                 Text(""),
                 tracking_board_renderable(
-                    self._tracking, frozenset(self._revealed), aim=aim
+                    self._tracking,
+                    frozenset(self._revealed),
+                    aim=aim,
+                    palette=palette,
                 ),
             )
         )
 
     def _refresh_controls(self) -> None:
-        controls = AIM_CONTROLS if self._phase == "aiming" else WAIT_CONTROLS
-        self.query_one("#controls", Static).update(
-            Group(
-                Text.from_markup(controls),
-                Text(""),
-                sidebar_scoreboard_renderable(self._match_status()),
+        keys = AIM_KEYS if self._phase == "aiming" else WAIT_KEYS
+        your_rows = your_ship_rows(self._placement, self._own_marks)
+        enemy_rows = enemy_ship_rows(self._enemy_sunk)
+        self.query_one("#sidebar", Static).update(
+            stacked_sidebar(
+                keys_table_renderable(keys, title="Keys"),
+                ship_table_renderable(your_rows, title="Your ships"),
+                ship_table_renderable(enemy_rows, title="Enemy ships"),
             )
         )
 
@@ -788,7 +1085,12 @@ class CombatScreen(Screen[None]):
             self._busy = False
             self._start_aim_watch()
             return
-        except (MatchConnectionError, OSError, ConnectionError, RevealVerificationError) as exc:
+        except (
+            MatchConnectionError,
+            OSError,
+            ConnectionError,
+            RevealVerificationError,
+        ) as exc:
             await self._end_from_error(exc)
             return
         apply_outgoing_shot(report, self._tracking, self._revealed)
@@ -815,7 +1117,12 @@ class CombatScreen(Screen[None]):
             report = await self.conn.serve_opponent_shot()
         except WorkerCancelled:
             return
-        except (MatchConnectionError, OSError, ConnectionError, RevealVerificationError) as exc:
+        except (
+            MatchConnectionError,
+            OSError,
+            ConnectionError,
+            RevealVerificationError,
+        ) as exc:
             await self._end_from_error(exc)
             return
         if report.match_end is not None and not report.coordinate:
@@ -836,7 +1143,6 @@ class CombatScreen(Screen[None]):
         self._start_aim_watch()
 
     async def _watch_match_end_while_aiming(self) -> None:
-        """While Aiming, notice opponent Abandon without blocking keys."""
         try:
             while self._phase == "aiming" and not self._busy:
                 end = await self.conn.poll_incoming(timeout=0.05)
@@ -890,11 +1196,26 @@ class CombatScreen(Screen[None]):
 
 
 class MatchEndScreen(Screen[None]):
-    """Winner / Abandoned presentation with frozen Match time; Enter → opening."""
+    """Outcome + match time with Lobby / Exit actions."""
 
-    BINDINGS = [
-        Binding("enter", "continue", "Continue", show=False),
-    ]
+    DEFAULT_CSS = """
+    MatchEndScreen {
+        align: center middle;
+    }
+    #match-end {
+        width: 56;
+        height: auto;
+        padding: 1 2;
+    }
+    #info, #body, #keys, #status {
+        width: 100%;
+        text-align: center;
+    }
+    #menu {
+        width: 100%;
+        height: auto;
+    }
+    """
 
     def __init__(
         self, *, role: Role, end: MatchEnd, match_time: str
@@ -905,24 +1226,34 @@ class MatchEndScreen(Screen[None]):
         self.match_time = match_time
 
     def compose(self) -> ComposeResult:
-        label = "Host" if self.role == "host" else "Guest"
         with Vertical(id="match-end"):
-            yield Static(f"{label} · Match over · Match time {self.match_time}", id="info")
+            yield Static(self._info_line(), id="info")
+            yield Rule()
             yield Static(self._body_markup(), id="body")
-            yield Static("Press Enter to return to Host / Join / Exit.", id="status")
+            yield Rule()
+            yield OptionList(
+                Option("Lobby", id=OPTION_LOBBY),
+                Option("Exit", id=OPTION_EXIT),
+                id="menu",
+            )
+            yield Static(keys_table_renderable(MATCH_END_KEYS, title="Keys"), id="keys")
+            yield Static("", id="status")
+
+    def on_mount(self) -> None:
+        self.query_one("#menu", OptionList).focus()
+
+    def _info_line(self) -> str:
+        label = "Host" if self.role == "host" else "Guest"
+        return f"{label} · Match over · Match time {self.match_time}"
 
     def _body_markup(self) -> str:
-        if self.end.outcome == MatchOutcome.ABANDONED:
-            outcome = "Match Abandoned."
-        elif self.end.outcome == MatchOutcome.WINNER:
-            if self.end.winner == self.role:
-                outcome = "You win!"
-            else:
-                winner = "Host" if self.end.winner == "host" else "Guest"
-                outcome = f"Winner: {winner}."
-        else:
-            outcome = f"Match {self.end.outcome}."
-        return f"{outcome}\nMatch time {self.match_time}"
+        role = cast(Role, self.role)
+        headline = match_end_headline(role, self.end)
+        detail = match_end_detail(role, self.end)
+        lines = [headline, f"Match time {self.match_time}"]
+        if detail:
+            lines.insert(1, detail)
+        return "\n".join(lines)
 
     def info_text(self) -> str:
         return str(self.query_one("#info", Static).content)
@@ -933,15 +1264,21 @@ class MatchEndScreen(Screen[None]):
     def set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message)
 
-    def action_continue(self) -> None:
-        _pop_to_opening(_battle_app(self))
+    def on_option_list_option_selected(
+        self, event: OptionList.OptionSelected
+    ) -> None:
+        option_id = event.option.id
+        if option_id == OPTION_LOBBY:
+            _pop_to_opening(_battle_app(self))
+            return
+        if option_id == OPTION_EXIT:
+            _battle_app(self).exit()
 
 
 class BattleShApp(App[None]):
     """Player Textual app. Relay URL and grace are CLI-only constructor args."""
 
     TITLE = "battle.sh"
-    # Exit + two-step Ctrl+C only; suppress Textual's ctrl+q instant quit.
     BINDINGS = [
         Binding("ctrl+c", "quit_interrupt", "Quit", show=False, priority=True),
         Binding("ctrl+q", "suppress_quit", show=False, priority=True),
@@ -954,6 +1291,7 @@ class BattleShApp(App[None]):
         grace_seconds: float,
         clock: Clock | None = None,
         placement_factory: Callable[[], Placement] | None = None,
+        theme_name: str | None = None,
     ) -> None:
         super().__init__()
         self.relay_url = relay_url
@@ -964,6 +1302,9 @@ class BattleShApp(App[None]):
             placement_factory if placement_factory is not None else random_placement
         )
         self._sigint_installed = False
+        self._initial_theme = (
+            theme_name if theme_name is not None else load_theme_name()
+        )
 
     @property
     def clock(self) -> Clock:
@@ -973,7 +1314,11 @@ class BattleShApp(App[None]):
         return OpeningScreen()
 
     def on_mount(self) -> None:
-        """Route OS SIGINT into the same QuitArm path as typed Ctrl+C."""
+        """Apply persisted theme and route OS SIGINT into QuitArm."""
+        if self._initial_theme in self.available_themes:
+            self.theme = self._initial_theme
+        else:
+            self.theme = DEFAULT_THEME
         self._sigint_installed = install_sigint(self.action_quit_interrupt)
 
     def on_unmount(self) -> None:
@@ -1057,6 +1402,9 @@ class BattleShApp(App[None]):
             return
         if isinstance(screen, MatchEndScreen):
             _pop_to_opening(self)
+            return
+        if isinstance(screen, ThemeScreen):
+            screen.action_back()
             return
         self.exit()
 

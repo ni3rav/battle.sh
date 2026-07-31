@@ -113,7 +113,8 @@ async def test_combat_screen_has_aim_chrome_and_controls() -> None:
                 controls = host_screen.controls_text()
                 assert "→ fire" in controls
                 assert "→ move" in controls
-                assert "`f`" in controls or "f" in controls.lower()
+                assert "f" in controls.lower()
+                assert "`f`" not in controls
                 assert "→ quit" in controls
                 assert "lock" not in controls.lower()
                 board = host_screen.board_text()
