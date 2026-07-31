@@ -11,9 +11,9 @@ from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Center, Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Input, OptionList, Rule, Static
+from textual.widgets import Button, Input, OptionList, Rule, Static
 from textual.widgets.option_list import Option
 from textual.worker import Worker, WorkerCancelled, WorkerState
 
@@ -103,12 +103,10 @@ CENTERED_FRAME_CSS = """
         align-horizontal: center;
     }
     .centered-menu {
-        width: auto;
-        min-width: 24;
-        max-width: 100%;
+        width: 32;
         height: auto;
         text-align: center;
-        padding: 0 2;
+        padding: 0 1;
     }
     .centered-menu > .option-list--option {
         text-align: center;
@@ -149,7 +147,6 @@ class OpeningScreen(Screen[None]):
         width: 100%;
         height: auto;
         padding: 1 2;
-        align-horizontal: center;
     }
     #brand {
         text-align: center;
@@ -169,14 +166,15 @@ class OpeningScreen(Screen[None]):
         with Vertical(id="opening"):
             yield Static(BRAND_TITLE, id="brand")
             yield Rule()
-            yield OptionList(
-                Option("Host", id=OPTION_HOST),
-                Option("Join", id=OPTION_JOIN),
-                Option("Theme", id=OPTION_THEME),
-                Option("Exit", id=OPTION_EXIT),
-                id="menu",
-                classes="centered-menu",
-            )
+            with Center():
+                yield OptionList(
+                    Option(Text("Host", justify="center"), id=OPTION_HOST),
+                    Option(Text("Join", justify="center"), id=OPTION_JOIN),
+                    Option(Text("Theme", justify="center"), id=OPTION_THEME),
+                    Option(Text("Exit", justify="center"), id=OPTION_EXIT),
+                    id="menu",
+                    classes="centered-menu",
+                )
             yield Rule()
             yield Static("", id="status")
 
@@ -404,11 +402,26 @@ class HostWaitingScreen(Screen[None]):
         width: 100%;
         height: auto;
         padding: 1 2;
-        align-horizontal: center;
     }
-    #headline, #invite, #body, #status {
+    #headline, #body, #status {
         width: 100%;
         text-align: center;
+    }
+    #invite-row {
+        height: 1;
+        align: center middle;
+    }
+    #invite {
+        width: auto;
+        text-align: center;
+    }
+    #copy-btn {
+        width: auto;
+        min-width: 10;
+        height: 1;
+        margin: 0 0 0 1;
+        border: none;
+        padding: 0 1;
     }
     """
 
@@ -422,18 +435,22 @@ class HostWaitingScreen(Screen[None]):
         with Vertical(id="host-waiting"):
             yield Static("Host · Lobby — waiting for Guest", id="headline")
             yield Rule()
-            yield Static("Creating Match…", id="invite")
+            with Center():
+                with Horizontal(id="invite-row"):
+                    yield Static("Creating Match…", id="invite")
+                    yield Button(Text("[copy]"), id="copy-btn", disabled=True)
             yield Static(
                 "Share the Invite with your opponent.\n"
                 "Match time starts when they join.",
                 id="body",
             )
             yield Rule()
-            yield OptionList(
-                Option("Back", id=OPTION_BACK),
-                id="menu",
-                classes="centered-menu",
-            )
+            with Center():
+                yield OptionList(
+                    Option(Text("Back", justify="center"), id=OPTION_BACK),
+                    id="menu",
+                    classes="centered-menu",
+                )
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -463,6 +480,7 @@ class HostWaitingScreen(Screen[None]):
             invite = await conn.create_match()
             self._invite = invite
             self.query_one("#invite", Static).update(f"Invite: {invite}")
+            self.query_one("#copy-btn", Button).disabled = False
             self.set_status("Waiting for Guest…")
             await conn.wait_for_player_joined()
             self._conn = None
@@ -472,6 +490,26 @@ class HostWaitingScreen(Screen[None]):
         except (MatchConnectionError, OSError, ConnectionError) as exc:
             self.set_status(f"Could not Host: {exc}")
             return
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id != "copy-btn":
+            return
+        invite = self._invite
+        if invite is None:
+            return
+        btn = self.query_one("#copy-btn", Button)
+        try:
+            _battle_app(self).copy_to_clipboard(invite)
+            btn.label = Text("[done]")
+            self.set_timer(2.0, self._reset_copy_btn)
+        except Exception:
+            btn.label = Text("[copy]")
+
+    def _reset_copy_btn(self) -> None:
+        try:
+            self.query_one("#copy-btn", Button).label = Text("[copy]")
+        except Exception:
+            pass
 
     def on_option_list_option_selected(
         self, event: OptionList.OptionSelected
@@ -515,16 +553,14 @@ class JoinScreen(Screen[None]):
         width: 100%;
         height: auto;
         padding: 1 2;
-        align-horizontal: center;
     }
     #headline, #status {
         width: 100%;
         text-align: center;
     }
     #invite-input {
-        width: auto;
-        min-width: 32;
-        max-width: 56;
+        width: 32;
+        text-align: center;
     }
     """
 
@@ -536,13 +572,15 @@ class JoinScreen(Screen[None]):
         with Vertical(id="join"):
             yield Static("Join · paste Invite", id="headline")
             yield Rule()
-            yield Input(placeholder="Invite phrase", id="invite-input")
-            yield OptionList(
-                Option("Join", id=OPTION_SUBMIT_JOIN),
-                Option("Back", id=OPTION_BACK),
-                id="menu",
-                classes="centered-menu",
-            )
+            with Center():
+                yield Input(placeholder="Invite phrase", id="invite-input")
+            with Center():
+                yield OptionList(
+                    Option(Text("Join", justify="center"), id=OPTION_SUBMIT_JOIN),
+                    Option(Text("Back", justify="center"), id=OPTION_BACK),
+                    id="menu",
+                    classes="centered-menu",
+                )
             yield Rule()
             yield Static("", id="status")
 
@@ -1261,7 +1299,6 @@ class MatchEndScreen(Screen[None]):
         width: 100%;
         height: auto;
         padding: 1 2;
-        align-horizontal: center;
     }
     #info, #body, #status {
         width: 100%;
@@ -1283,12 +1320,13 @@ class MatchEndScreen(Screen[None]):
             yield Rule()
             yield Static(self._body_markup(), id="body")
             yield Rule()
-            yield OptionList(
-                Option("Lobby", id=OPTION_LOBBY),
-                Option("Exit", id=OPTION_EXIT),
-                id="menu",
-                classes="centered-menu",
-            )
+            with Center():
+                yield OptionList(
+                    Option(Text("Lobby", justify="center"), id=OPTION_LOBBY),
+                    Option(Text("Exit", justify="center"), id=OPTION_EXIT),
+                    id="menu",
+                    classes="centered-menu",
+                )
             yield Static("", id="status")
 
     def on_mount(self) -> None:
