@@ -93,3 +93,26 @@ def test_board_glyphs_are_distinct() -> None:
         tracking_board_renderable({}, frozenset(), aim=coordinate("E", 5))
     )
     assert AIM_GLYPH in console2.export_text()
+
+
+def test_compact_own_board_is_narrower_than_default() -> None:
+    placement = Placement(
+        {
+            "Carrier": frozenset(coordinate(c, 1) for c in "ABCDE"),
+            "Battleship": frozenset(coordinate(c, 2) for c in "ABCD"),
+            "Cruiser": frozenset(coordinate(c, 3) for c in "ABC"),
+            "Submarine": frozenset(coordinate(c, 4) for c in "ABC"),
+            "Destroyer": frozenset(coordinate(c, 5) for c in "AB"),
+        }
+    )
+    full = Console(record=True, width=40, force_terminal=True)
+    full.print(own_board_renderable(placement, {}))
+    compact = Console(record=True, width=40, force_terminal=True)
+    compact.print(own_board_renderable(placement, {}, compact=True))
+    full_lines = [line.rstrip() for line in full.export_text().splitlines() if line.strip()]
+    compact_lines = [
+        line.rstrip() for line in compact.export_text().splitlines() if line.strip()
+    ]
+    assert max(len(line) for line in compact_lines) < max(len(line) for line in full_lines)
+    assert "10" in compact.export_text()
+    assert "Your fleet" in compact.export_text()

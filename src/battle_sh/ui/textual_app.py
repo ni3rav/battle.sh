@@ -941,7 +941,7 @@ class CombatScreen(Screen[None]):
         layout: vertical;
     }}
     #info {{
-        height: 4;
+        height: 2;
         padding: 0 1;
         text-align: center;
     }}
@@ -952,7 +952,7 @@ class CombatScreen(Screen[None]):
     #board-panel {{
         width: 1fr;
         padding: 0 1;
-        align: center middle;
+        align: center top;
     }}
     #board {{
         width: auto;
@@ -960,7 +960,7 @@ class CombatScreen(Screen[None]):
     }}
     {SIDEBAR_CSS}
     #status {{
-        height: 3;
+        height: 1;
         padding: 0 1;
         text-align: center;
     }}
@@ -1112,9 +1112,11 @@ class CombatScreen(Screen[None]):
         self.query_one("#board", Static).update(
             Group(
                 own_board_renderable(
-                    self._placement, self._own_marks, palette=palette
+                    self._placement,
+                    self._own_marks,
+                    palette=palette,
+                    compact=True,
                 ),
-                Text(""),
                 tracking_board_renderable(
                     self._tracking,
                     frozenset(self._revealed),

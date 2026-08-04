@@ -146,11 +146,20 @@ def render_board(
     selected: str | None = None,
     aim: Coordinate | None = None,
     palette: BoardPalette = DEFAULT_PALETTE,
+    compact: bool = False,
 ) -> Table:
-    table = Table(title=title, show_header=True, box=None, pad_edge=False)
+    table = Table(
+        title=title,
+        show_header=True,
+        box=None,
+        pad_edge=False,
+        padding=0 if compact else (0, 1),
+        collapse_padding=compact,
+    )
     table.add_column(" ", justify="right")
+    cell_width = 1 if compact else 2
     for col in COLUMNS:
-        table.add_column(col, justify="center", width=2)
+        table.add_column(col, justify="center", width=cell_width)
     for row in ROWS:
         cells = [
             _cell_glyph(
@@ -180,6 +189,7 @@ def own_board_renderable(
     *,
     selected: str | None = None,
     palette: BoardPalette = DEFAULT_PALETTE,
+    compact: bool = False,
 ) -> Table:
     return render_board(
         "Your fleet",
@@ -188,6 +198,7 @@ def own_board_renderable(
         show_ships=True,
         selected=selected,
         palette=palette,
+        compact=compact,
     )
 
 
