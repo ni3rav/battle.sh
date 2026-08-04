@@ -940,6 +940,9 @@ class CombatScreen(Screen[None]):
     CombatScreen {{
         layout: vertical;
     }}
+    CombatScreen Rule.-horizontal {{
+        margin: 0;
+    }}
     #info {{
         height: 2;
         padding: 0 1;
