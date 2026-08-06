@@ -488,7 +488,11 @@ class ThemeScreen(Screen[None]):
                         placement, own_marks, palette=palette, compact=True
                     ),
                     tracking_board_renderable(
-                        tracking, revealed, aim=coordinate("E", 5), palette=palette
+                        tracking,
+                        revealed,
+                        aim=coordinate("E", 5),
+                        palette=palette,
+                        compact=True,
                     ),
                 ],
                 padding=2,
@@ -1049,13 +1053,13 @@ class PlacementScreen(Screen[None]):
         _pop_to_opening(_battle_app(self))
 
 
+# Fleet preview frame in character cells at 16:9 (height fits title+header+10 rows).
+FLEET_PREVIEW_HEIGHT = 12
+FLEET_PREVIEW_WIDTH = round(FLEET_PREVIEW_HEIGHT * 16 / 9)  # 21
+
+
 class CombatScreen(Screen[None]):
     """Combat phase: Aim / off-turn wait, exact keys, boards + ship tables."""
-
-    # Fleet preview frame ≈ 16:9 with typical terminal cell aspect (~1:2).
-    # height 12 (title + header + 10 rows); width = 12 * (16/9) * 2 ≈ 43.
-    _FLEET_PREVIEW_WIDTH = 43
-    _FLEET_PREVIEW_HEIGHT = 12
 
     DEFAULT_CSS = f"""
     CombatScreen {{
@@ -1080,13 +1084,13 @@ class CombatScreen(Screen[None]):
         align: left top;
     }}
     #fleet-preview {{
-        width: {_FLEET_PREVIEW_WIDTH};
-        height: {_FLEET_PREVIEW_HEIGHT};
+        width: {FLEET_PREVIEW_WIDTH};
+        height: {FLEET_PREVIEW_HEIGHT};
         align: center middle;
         overflow: hidden;
     }}
     #board {{
-        width: 1fr;
+        width: auto;
         height: auto;
         padding: 0 0 0 1;
     }}
