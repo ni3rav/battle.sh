@@ -78,13 +78,23 @@ BRAND_TITLE = "battle.sh"
 # Banner lines are ~88 cols; require a little padding so centering still fits.
 BANNER_MIN_WIDTH = 92
 
+OPTION_RELAY = "relay"
 OPTION_HOST = "host"
 OPTION_JOIN = "join"
 OPTION_THEME = "theme"
 OPTION_EXIT = "exit"
 OPTION_BACK = "back"
+OPTION_SAVE_RELAY = "save_relay"
 OPTION_SUBMIT_JOIN = "submit_join"
 OPTION_LOBBY = "lobby"
+
+
+def normalize_relay_url(raw: str) -> str | None:
+    """Return a stripped relay URL if it uses ``ws://`` or ``wss://``, else None."""
+    url = raw.strip()
+    if url.startswith("ws://") or url.startswith("wss://"):
+        return url
+    return None
 
 _PlacementPhase = Literal["editing", "waiting"]
 _CombatPhase = Literal["aiming", "waiting"]
@@ -137,7 +147,7 @@ def brand_renderable(*, width: int) -> Text:
 
 
 class OpeningScreen(Screen[None]):
-    """Centered opening menu: Host, Join, Theme, Exit."""
+    """Centered opening menu: Relay, Host, Join, Theme, Exit."""
 
     DEFAULT_CSS = CENTERED_FRAME_CSS + """
     OpeningScreen {
@@ -168,6 +178,7 @@ class OpeningScreen(Screen[None]):
             yield Rule()
             with Center():
                 yield OptionList(
+                    Option(Text("Relay", justify="center"), id=OPTION_RELAY),
                     Option(Text("Host", justify="center"), id=OPTION_HOST),
                     Option(Text("Join", justify="center"), id=OPTION_JOIN),
                     Option(Text("Theme", justify="center"), id=OPTION_THEME),
@@ -180,7 +191,11 @@ class OpeningScreen(Screen[None]):
 
     def on_mount(self) -> None:
         self._refresh_brand()
+        self._refresh_relay_status()
         self.query_one("#menu", OptionList).focus()
+
+    def on_screen_resume(self) -> None:
+        self._refresh_relay_status()
 
     def on_resize(self, event: events.Resize) -> None:
         self._refresh_brand()
@@ -190,8 +205,14 @@ class OpeningScreen(Screen[None]):
             brand_renderable(width=self.size.width)
         )
 
+    def _refresh_relay_status(self) -> None:
+        self.set_status(f"Relay: {_battle_app(self).relay_url}")
+
     def set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message)
+
+    def status_text(self) -> str:
+        return str(self.query_one("#status", Static).content)
 
     def on_option_list_option_selected(
         self, event: OptionList.OptionSelected
@@ -200,6 +221,9 @@ class OpeningScreen(Screen[None]):
         app = _battle_app(self)
         if option_id == OPTION_EXIT:
             app.exit()
+            return
+        if option_id == OPTION_RELAY:
+            app.push_screen(RelayScreen())
             return
         if option_id == OPTION_HOST:
             app.push_screen(HostWaitingScreen())
@@ -210,6 +234,89 @@ class OpeningScreen(Screen[None]):
         if option_id == OPTION_THEME:
             app.push_screen(ThemeScreen())
             return
+
+
+class RelayScreen(Screen[None]):
+    """Edit the session Relay URL; Save applies, Back/Esc discards."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", show=False),
+    ]
+
+    DEFAULT_CSS = CENTERED_FRAME_CSS + """
+    RelayScreen {
+        align: center middle;
+    }
+    #relay {
+        width: 100%;
+        height: auto;
+        padding: 1 2;
+    }
+    #headline, #status {
+        width: 100%;
+        text-align: center;
+    }
+    #relay-input {
+        width: 48;
+        text-align: center;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="relay"):
+            yield Static("Relay · WebSocket URL", id="headline")
+            yield Rule()
+            with Center():
+                yield Input(
+                    placeholder="ws://127.0.0.1:8765",
+                    id="relay-input",
+                )
+            with Center():
+                yield OptionList(
+                    Option(Text("Save", justify="center"), id=OPTION_SAVE_RELAY),
+                    Option(Text("Back", justify="center"), id=OPTION_BACK),
+                    id="menu",
+                    classes="centered-menu",
+                )
+            yield Rule()
+            yield Static("", id="status")
+
+    def on_mount(self) -> None:
+        relay_input = self.query_one("#relay-input", Input)
+        relay_input.value = _battle_app(self).relay_url
+        relay_input.focus()
+
+    def set_status(self, message: str) -> None:
+        self.query_one("#status", Static).update(message)
+
+    def status_text(self) -> str:
+        return str(self.query_one("#status", Static).content)
+
+    def on_option_list_option_selected(
+        self, event: OptionList.OptionSelected
+    ) -> None:
+        if event.option.id == OPTION_BACK:
+            self.action_back()
+            return
+        if event.option.id == OPTION_SAVE_RELAY:
+            self._save_relay()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "relay-input":
+            self._save_relay()
+
+    def _save_relay(self) -> None:
+        raw = self.query_one("#relay-input", Input).value
+        url = normalize_relay_url(raw)
+        if url is None:
+            self.set_status("Relay URL must start with ws:// or wss://")
+            return
+        app = _battle_app(self)
+        app.relay_url = url
+        app.pop_screen()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
 
 
 class ThemeScreen(Screen[None]):
@@ -1371,7 +1478,7 @@ class MatchEndScreen(Screen[None]):
 
 
 class BattleShApp(App[None]):
-    """Player Textual app. Relay URL and grace are CLI-only constructor args."""
+    """Player Textual app. Relay URL starts from CLI/env; editable in-session."""
 
     TITLE = "battle.sh"
     BINDINGS = [

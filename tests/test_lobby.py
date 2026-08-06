@@ -54,7 +54,7 @@ async def test_back_on_join_returns_to_opening() -> None:
         app = make_app(relay_url)
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("down", "enter")  # Join
+            await pilot.press("down", "down", "enter")  # Join (Relay, Host, then Join)
             await wait_until(pilot, lambda: isinstance(app.screen, JoinScreen))
             await pilot.press("escape")  # Back
             await wait_until(pilot, lambda: isinstance(app.screen, OpeningScreen))
@@ -67,7 +67,7 @@ async def test_join_missing_invite_shows_error_with_back() -> None:
         app = make_app(relay_url)
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("down", "enter")  # Join
+            await pilot.press("down", "down", "enter")  # Join (Relay, Host, then Join)
             await wait_until(pilot, lambda: isinstance(app.screen, JoinScreen))
             await pilot.press("tab", "enter")  # focus Join option, submit empty
             await wait_until(
@@ -86,7 +86,7 @@ async def test_join_rejected_invite_shows_error_with_back() -> None:
         app = make_app(relay_url)
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("down", "enter")  # Join
+            await pilot.press("down", "down", "enter")  # Join (Relay, Host, then Join)
             await wait_until(pilot, lambda: isinstance(app.screen, JoinScreen))
             await pilot.press(*list("not-a-real-invite-zzzz"))
             await pilot.press("enter")  # submit via Input
@@ -113,7 +113,7 @@ async def test_host_and_guest_connect_via_in_app_lobby_to_placement() -> None:
 
             async with guest_app.run_test() as guest_pilot:
                 await guest_pilot.pause()
-                await guest_pilot.press("down", "enter")  # Join
+                await guest_pilot.press("down", "down", "enter")  # Join (Relay, Host, then Join)
                 await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )

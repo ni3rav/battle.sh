@@ -40,7 +40,7 @@ async def host_to_waiting(
     pilot: Pilot[None], app: BattleShApp
 ) -> HostWaitingScreen:
     await pilot.pause()
-    await pilot.press("enter")  # Host
+    await pilot.press("down", "enter")  # Host (Relay is first)
     await wait_until(
         pilot,
         lambda: isinstance(app.screen, HostWaitingScreen)

@@ -1,4 +1,4 @@
-"""Opening screen: brand title, Host/Join/Theme/Exit, QuitArm, q never quits."""
+"""Opening screen: brand title, Relay/Host/Join/Theme/Exit, QuitArm, q never quits."""
 
 from __future__ import annotations
 
@@ -56,12 +56,12 @@ async def test_opening_brand_follows_terminal_width() -> None:
 
 @pytest.mark.asyncio
 async def test_opening_menu_exit_via_keys() -> None:
-    """Opening lists Host / Join / Theme / Exit; Exit leaves."""
+    """Opening lists Relay / Host / Join / Theme / Exit; Exit leaves."""
     app = _app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        # Exit is fourth.
-        await pilot.press("down", "down", "down", "enter")
+        # Exit is fifth.
+        await pilot.press("down", "down", "down", "down", "enter")
         await pilot.pause()
     assert not app.is_running
 
@@ -71,7 +71,7 @@ async def test_exit_leaves_the_app() -> None:
     app = _app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("down", "down", "down", "enter")
+        await pilot.press("down", "down", "down", "down", "enter")
         await pilot.pause()
     assert not app.is_running
 
@@ -81,7 +81,7 @@ async def test_theme_opens_picker_screen() -> None:
     app = _app()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        await pilot.press("down", "down", "enter")  # Theme
+        await pilot.press("down", "down", "down", "enter")  # Theme
         await pilot.pause()
         assert isinstance(app.screen, ThemeScreen)
 
@@ -99,7 +99,7 @@ async def test_theme_preview_applies_live_while_browsing(
     )
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.pause()
-        await pilot.press("down", "down", "enter")  # Theme
+        await pilot.press("down", "down", "down", "enter")  # Theme
         await pilot.pause()
         assert isinstance(app.screen, ThemeScreen)
         start = app.theme

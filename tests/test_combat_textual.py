@@ -79,7 +79,7 @@ async def _both_to_combat(
     invite: str,
 ) -> None:
     await guest_pilot.pause()
-    await guest_pilot.press("down", "enter")
+    await guest_pilot.press("down", "down", "enter")
     await wait_until(guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen))
     await guest_pilot.press(*list(invite))
     await guest_pilot.press("enter")
