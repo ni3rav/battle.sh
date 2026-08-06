@@ -6,6 +6,7 @@ import contextlib
 from collections.abc import Callable
 from typing import Literal, cast
 
+from rich.columns import Columns
 from rich.console import Console, Group
 from rich.text import Text
 from textual import events
@@ -481,10 +482,21 @@ class ThemeScreen(Screen[None]):
         return Group(
             Text.from_markup(f"[bold]Preview[/] · {_battle_app(self).theme}"),
             Text(""),
-            own_board_renderable(placement, own_marks, palette=palette),
-            Text(""),
-            tracking_board_renderable(
-                tracking, revealed, aim=coordinate("E", 5), palette=palette
+            Columns(
+                [
+                    own_board_renderable(
+                        placement, own_marks, palette=palette, compact=True
+                    ),
+                    tracking_board_renderable(
+                        tracking,
+                        revealed,
+                        aim=coordinate("E", 5),
+                        palette=palette,
+                        compact=True,
+                    ),
+                ],
+                padding=2,
+                equal=False,
             ),
             Text(""),
             stacked_sidebar(
@@ -1041,6 +1053,11 @@ class PlacementScreen(Screen[None]):
         _pop_to_opening(_battle_app(self))
 
 
+# Fleet preview frame in character cells at 16:9 (height fits title+header+10 rows).
+FLEET_PREVIEW_HEIGHT = 12
+FLEET_PREVIEW_WIDTH = round(FLEET_PREVIEW_HEIGHT * 16 / 9)  # 21
+
+
 class CombatScreen(Screen[None]):
     """Combat phase: Aim / off-turn wait, exact keys, boards + ship tables."""
 
@@ -1063,11 +1080,19 @@ class CombatScreen(Screen[None]):
     #board-panel {{
         width: 1fr;
         padding: 0 1;
-        align: center top;
+        layout: horizontal;
+        align: left top;
+    }}
+    #fleet-preview {{
+        width: {FLEET_PREVIEW_WIDTH};
+        height: {FLEET_PREVIEW_HEIGHT};
+        align: center middle;
+        overflow: hidden;
     }}
     #board {{
         width: auto;
         height: auto;
+        padding: 0 0 0 1;
     }}
     {SIDEBAR_CSS}
     #status {{
@@ -1112,7 +1137,8 @@ class CombatScreen(Screen[None]):
             yield Static(f"{label} · Aim · Match time 0:00", id="info")
             yield Rule()
             with Horizontal(id="middle"):
-                with Vertical(id="board-panel"):
+                with Horizontal(id="board-panel"):
+                    yield Static("", id="fleet-preview")
                     yield Static("", id="board")
                 yield Rule(orientation="vertical")
                 yield Static("", id="sidebar")
@@ -1158,7 +1184,9 @@ class CombatScreen(Screen[None]):
         return str(self.query_one("#status", Static).content)
 
     def board_text(self) -> str:
-        return _static_plain(self.query_one("#board", Static), width=80)
+        fleet = _static_plain(self.query_one("#fleet-preview", Static), width=48)
+        tracking = _static_plain(self.query_one("#board", Static), width=80)
+        return f"{fleet}\n{tracking}"
 
     def set_status(self, message: str) -> None:
         self._status = message or " "
@@ -1220,20 +1248,20 @@ class CombatScreen(Screen[None]):
     def _refresh_board(self) -> None:
         aim = self._aim if self._phase == "aiming" else None
         palette = self._palette()
+        self.query_one("#fleet-preview", Static).update(
+            own_board_renderable(
+                self._placement,
+                self._own_marks,
+                palette=palette,
+                compact=True,
+            )
+        )
         self.query_one("#board", Static).update(
-            Group(
-                own_board_renderable(
-                    self._placement,
-                    self._own_marks,
-                    palette=palette,
-                    compact=True,
-                ),
-                tracking_board_renderable(
-                    self._tracking,
-                    frozenset(self._revealed),
-                    aim=aim,
-                    palette=palette,
-                ),
+            tracking_board_renderable(
+                self._tracking,
+                frozenset(self._revealed),
+                aim=aim,
+                palette=palette,
             )
         )
 

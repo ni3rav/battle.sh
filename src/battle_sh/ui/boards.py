@@ -208,6 +208,7 @@ def tracking_board_renderable(
     *,
     aim: Coordinate | None = None,
     palette: BoardPalette = DEFAULT_PALETTE,
+    compact: bool = False,
 ) -> Table:
     # Revealed sunk cells are known occupied, but Ship names are not shown here.
     ship_at = {cell: "sunk" for cell in revealed}
@@ -219,6 +220,7 @@ def tracking_board_renderable(
         show_ships=True,
         aim=aim,
         palette=palette,
+        compact=compact,
     )
 
 
