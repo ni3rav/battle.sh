@@ -123,13 +123,11 @@ async def test_combat_screen_has_aim_chrome_and_controls() -> None:
 
 
 @pytest.mark.asyncio
-async def test_combat_boards_fit_at_short_terminal_height() -> None:
-    """Info/status padding + compact fleet must leave room for opponent row 10."""
+async def test_combat_fleet_preview_left_of_opponent_at_16_9() -> None:
+    """Your fleet sits in a ~16:9 preview frame to the left of the opponent board."""
     async with start_relay() as relay_url:
         host_app = make_app(relay_url, placement_factory=_fixed_placement)
         guest_app = make_app(relay_url, placement_factory=_fixed_placement)
-        # Height where the old chrome (info=4, status=3, full fleet + spacer)
-        # clipped the tracking board's last row.
         async with host_app.run_test(size=(120, 32)) as host_pilot:
             waiting = await host_to_waiting(host_pilot, host_app)
             invite = waiting.displayed_invite()
@@ -140,11 +138,19 @@ async def test_combat_boards_fit_at_short_terminal_height() -> None:
                 )
                 host_screen = host_app.screen
                 assert isinstance(host_screen, CombatScreen)
-                board_widget = host_screen.query_one("#board")
+                fleet = host_screen.query_one("#fleet-preview")
+                tracking = host_screen.query_one("#board")
                 panel = host_screen.query_one("#board-panel")
-                assert board_widget.region.height <= panel.region.height
+                assert fleet.region.x < tracking.region.x
+                assert fleet.region.width == CombatScreen._FLEET_PREVIEW_WIDTH
+                assert fleet.region.height == CombatScreen._FLEET_PREVIEW_HEIGHT
+                # Cell aspect ~1:2 → visual ratio ≈ width/(height*2) ≈ 16/9.
+                visual = fleet.region.width / (fleet.region.height * 2)
+                assert abs(visual - 16 / 9) < 0.05
+                assert tracking.region.height <= panel.region.height
                 board = host_screen.board_text()
                 assert board.count("10") >= 2
+                assert "Your fleet" in board
                 assert "Opponent" in board
 
 
