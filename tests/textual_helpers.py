@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from textual.pilot import Pilot
+from textual.widgets import OptionList
 
 from battle_sh.rules.placement import Placement
 from battle_sh.ui.clock import FakeClock
-from battle_sh.ui.textual_app import BattleShApp, HostWaitingScreen
+from battle_sh.ui.textual_app import BattleShApp, HostWaitingScreen, OpeningScreen
 
 
 def make_app(
@@ -40,7 +41,12 @@ async def host_to_waiting(
     pilot: Pilot[None], app: BattleShApp
 ) -> HostWaitingScreen:
     await pilot.pause()
-    await pilot.press("down", "enter")  # Host (Relay is first)
+    assert isinstance(app.screen, OpeningScreen)
+    menu = app.screen.query_one("#menu", OptionList)
+    # Relay is index 0; Host is 1. Highlight may still be on Host after a prior visit.
+    menu.highlighted = 1
+    menu.focus()
+    await pilot.press("enter")
     await wait_until(
         pilot,
         lambda: isinstance(app.screen, HostWaitingScreen)

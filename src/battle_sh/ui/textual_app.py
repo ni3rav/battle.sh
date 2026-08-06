@@ -196,6 +196,7 @@ class OpeningScreen(Screen[None]):
 
     def on_screen_resume(self) -> None:
         self._refresh_relay_status()
+        self.query_one("#menu", OptionList).focus()
 
     def on_resize(self, event: events.Resize) -> None:
         self._refresh_brand()
@@ -316,7 +317,7 @@ class RelayScreen(Screen[None]):
         app.pop_screen()
 
     def action_back(self) -> None:
-        self.app.pop_screen()
+        _battle_app(self).pop_screen()
 
 
 class ThemeScreen(Screen[None]):
