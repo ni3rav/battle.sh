@@ -42,7 +42,7 @@ async def test_placement_screen_has_three_bands_and_placement_controls() -> None
 
             async with guest_app.run_test(size=(120, 40)) as guest_pilot:
                 await guest_pilot.pause()
-                await guest_pilot.press("down", "enter")
+                await guest_pilot.press("down", "down", "enter")
                 await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )
@@ -88,7 +88,7 @@ async def test_match_time_starts_only_after_guest_joins_not_in_host_lobby() -> N
 
             async with guest_app.run_test(size=(120, 40)) as guest_pilot:
                 await guest_pilot.pause()
-                await guest_pilot.press("down", "enter")
+                await guest_pilot.press("down", "down", "enter")
                 await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )
@@ -125,7 +125,7 @@ async def test_placement_keys_select_and_move_on_textual_screen() -> None:
 
             async with guest_app.run_test(size=(120, 40)) as guest_pilot:
                 await guest_pilot.pause()
-                await guest_pilot.press("down", "enter")
+                await guest_pilot.press("down", "down", "enter")
                 await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )
@@ -161,7 +161,7 @@ async def test_lock_commits_and_both_wait_then_both_ready() -> None:
 
             async with guest_app.run_test(size=(120, 40)) as guest_pilot:
                 await guest_pilot.pause()
-                await guest_pilot.press("down", "enter")
+                await guest_pilot.press("down", "down", "enter")
                 await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )
@@ -213,7 +213,7 @@ async def test_no_back_during_placement_and_q_does_not_quit() -> None:
 
             async with guest_app.run_test(size=(120, 40)) as guest_pilot:
                 await guest_pilot.pause()
-                await guest_pilot.press("down", "enter")
+                await guest_pilot.press("down", "down", "enter")
                 await wait_until(
                     guest_pilot, lambda: isinstance(guest_app.screen, JoinScreen)
                 )

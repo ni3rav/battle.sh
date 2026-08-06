@@ -16,14 +16,15 @@ run `uv`, or invoke Python modules to play.
 The whole experience is one executable:
 
 ```bash
-battle-sh                  # open the Textual player app (Host / Join / Exit)
-battle-sh --relay URL      # same, with a Relay URL
+battle-sh                  # open the Textual player app (Relay / Host / Join / …)
+battle-sh --relay URL      # same, with a Relay URL as the launch default
 battle-sh relay            # run the Match Relay server
 ```
 
 Point clients at a relay with `--relay` (or the `BATTLE_SH_RELAY` environment
-variable); it defaults to `ws://127.0.0.1:8765`. Reconnect grace is
-`--grace-seconds` (CLI-only).
+variable); it defaults to `ws://127.0.0.1:8765`. You can also set or change the
+Relay URL in-app from the opening **Relay** menu (session-only; the next launch
+uses flag/env/default again). Reconnect grace is `--grace-seconds` (CLI-only).
 
 ```bash
 # Terminal A — Relay
@@ -32,18 +33,20 @@ battle-sh relay --bind-host 127.0.0.1 --port 8765
 
 ```bash
 # Terminal B — Player (Host)
-battle-sh --relay ws://127.0.0.1:8765
-# Choose Host; share the Invite shown on the waiting screen.
+battle-sh
+# Opening shows the active Relay URL. Optionally choose Relay to edit it,
+# then Host; share the Invite shown on the waiting screen.
 ```
 
 ```bash
 # Terminal C — Player (Guest)
-battle-sh --relay ws://127.0.0.1:8765
-# Choose Join; paste the Invite in-app.
+battle-sh
+# Same Relay URL as the Host (flag, env, or in-app Relay). Choose Join;
+# paste the Invite in-app.
 ```
 
-Against a hosted relay, use the `wss://` URL, e.g.
-`battle-sh --relay wss://relay.example.com`.
+Against a hosted relay, use the `wss://` URL via `--relay` or the in-app Relay
+screen, e.g. `wss://relay.example.com`.
 
 The Match UI shows a live scoreboard: active/remaining ships per side, hits,
 current turn, match state, and a connection indicator for both players.
@@ -83,7 +86,7 @@ uv run battle-sh --relay ws://127.0.0.1:8765
 
 ### Live Match UI
 
-Fixed **three-band** layout: top = Match/role/turn + Match time; middle = wide board | phase-aware controls; bottom = status/errors. Match time starts when the Guest joins (not during Host lobby wait) and freezes on the Winner/Abandoned end screen. After end presentation, the app returns to the opening Host / Join / Exit menu.
+Fixed **three-band** layout: top = Match/role/turn + Match time; middle = wide board | phase-aware controls; bottom = status/errors. Match time starts when the Guest joins (not during Host lobby wait) and freezes on the Winner/Abandoned end screen. After end presentation, the app returns to the opening Relay / Host / Join / Theme / Exit menu.
 
 ### Key map
 
