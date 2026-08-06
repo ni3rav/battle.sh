@@ -123,6 +123,32 @@ async def test_combat_screen_has_aim_chrome_and_controls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_combat_boards_fit_at_short_terminal_height() -> None:
+    """Info/status padding + compact fleet must leave room for opponent row 10."""
+    async with start_relay() as relay_url:
+        host_app = make_app(relay_url, placement_factory=_fixed_placement)
+        guest_app = make_app(relay_url, placement_factory=_fixed_placement)
+        # Height where the old chrome (info=4, status=3, full fleet + spacer)
+        # clipped the tracking board's last row.
+        async with host_app.run_test(size=(120, 32)) as host_pilot:
+            waiting = await host_to_waiting(host_pilot, host_app)
+            invite = waiting.displayed_invite()
+            assert invite is not None
+            async with guest_app.run_test(size=(120, 32)) as guest_pilot:
+                await _both_to_combat(
+                    host_pilot, guest_pilot, host_app, guest_app, invite
+                )
+                host_screen = host_app.screen
+                assert isinstance(host_screen, CombatScreen)
+                board_widget = host_screen.query_one("#board")
+                panel = host_screen.query_one("#board-panel")
+                assert board_widget.region.height <= panel.region.height
+                board = host_screen.board_text()
+                assert board.count("10") >= 2
+                assert "Opponent" in board
+
+
+@pytest.mark.asyncio
 async def test_off_turn_wait_shows_spinner_and_ignores_aim_keys() -> None:
     async with start_relay() as relay_url:
         host_app = make_app(relay_url, placement_factory=_fixed_placement)
