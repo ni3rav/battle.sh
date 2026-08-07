@@ -1,6 +1,6 @@
 [project]
 name = "battle-sh"
-version = "0.1.5"
+version = "0.1.6"
 description = "Terminal two-player Battleship over a WebSocket relay"
 readme = "README.md"
 requires-python = ">=3.12"
